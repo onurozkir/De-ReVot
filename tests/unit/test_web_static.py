@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-APP_JS = Path(__file__).parents[2] / "src" / "teams_translator" / "web" / "static" / "app.js"
+APP_JS = Path(__file__).parents[2] / "src" / "voice_translator" / "web" / "static" / "app.js"
 
 
 def test_ui_running_state_checks_use_only_the_normalized_status():

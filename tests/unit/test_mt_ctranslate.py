@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from teams_translator.core.types import Direction, UtteranceEvent, UtteranceState
-from teams_translator.translation.ctranslate_backend import (
+from voice_translator.core.types import Direction, UtteranceEvent, UtteranceState
+from voice_translator.translation.ctranslate_backend import (
     CTranslate2MTAdapter,
     _apply_glossary,
     _resolve_model_dir,

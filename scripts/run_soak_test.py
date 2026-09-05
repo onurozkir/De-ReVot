@@ -4,9 +4,9 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from teams_translator.config.loader import load_config
-from teams_translator.streaming.orchestrator import MeetingOrchestrator
-from teams_translator.telemetry.system import SystemResourceMonitor
+from voice_translator.config.loader import load_config
+from voice_translator.streaming.orchestrator import MeetingOrchestrator
+from voice_translator.telemetry.system import SystemResourceMonitor
 
 async def main():
     print("=" * 60)

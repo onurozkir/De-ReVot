@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Realtime Voice Translator</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Realtime Voice Translator</h1>
+      <span style="font-size: 0.8rem; color: var(--text-secondary);">Full-Duplex Turkish ↔ English Localhost AI</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 1rem;">
+      <span id="meetingIdLabel" style="font-size: 0.85rem; color: var(--text-secondary);">No active meeting</span>
+      <span id="statusBadge" class="status-badge status-stopped">STOPPED</span>
+    </div>
+  </header>
+
+  <div class="layout-grid">
+    <!-- Sidebar / Controls -->
+    <div class="sidebar">
+      <div class="card">
+        <h2>Meetings & Games</h2>
+        <div class="form-group">
+          <label for="appPresetSelect">Application:</label>
+          <select id="appPresetSelect"></select>
+        </div>
+        <p id="setupGuidance" class="setup-guidance"></p>
+        <div class="form-group">
+          <label for="inputModeSelect">Microphone mode (incoming subtitles stay active):</label>
+          <select id="inputModeSelect">
+            <option value="vad">Hands-free / Voice Activity</option>
+            <option value="ptt">Push-to-Talk</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="pttKeyInput">Global Push-to-Talk key:</label>
+          <input id="pttKeyInput" value="V" placeholder="V, Mouse 4, Caps Lock" maxlength="40">
+        </div>
+        <div class="form-group">
+          <label for="asrModelSelect">Speech recognition model (next session):</label>
+          <select id="asrModelSelect"></select>
+          <p id="asrModelHelp" class="setup-guidance"></p>
+        </div>
+        <label class="check-row"><input type="checkbox" id="overlayEnabled" checked> Desktop subtitle HUD</label>
+        <p class="setup-guidance">Start Meeting starts both directions, including games. HUD works over desktop apps and borderless games.</p>
+        <div id="liveControls" hidden>
+          <button id="btnPTT" type="button" class="btn-primary" aria-pressed="false">Hold to Talk</button>
+          <button id="btnPause" type="button" aria-pressed="false">Pause Translation</button>
+          <button id="btnMute" type="button" class="btn-danger" aria-pressed="false">Emergency Mute</button>
+        </div>
+        <p id="controlsStatus" class="setup-guidance" role="status" aria-live="polite"></p>
+      </div>
+      <div class="card">
+        <h2>Audio & Devices</h2>
+        <div class="form-group">
+          <label for="micSelect">Physical Microphone:</label>
+          <select id="micSelect"></select>
+          <div id="micDeviceInfo" class="device-detail">Not resolved</div>
+        </div>
+        <div class="form-group">
+          <label for="loopbackSelect">Incoming Audio (Speaker Loopback):</label>
+          <select id="loopbackSelect"></select>
+          <div id="loopbackDeviceInfo" class="device-detail">Not resolved</div>
+        </div>
+        <div class="form-group">
+          <label for="renderSelect">VB-CABLE Render (Input):</label>
+          <select id="renderSelect"></select>
+          <div id="renderDeviceInfo" class="device-detail">Not resolved</div>
+        </div>
+        <div class="form-group">
+          <label for="profileSelect">Cloned Voice Profile (Live-Switchable):</label>
+          <select id="profileSelect"></select>
+        </div>
+        <div class="form-group">
+          <label for="targetLanguageSelect">Outgoing Target Language:</label>
+          <select id="targetLanguageSelect">
+            <option value="en" selected>English (en)</option>
+            <option value="fr">Français (fr)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="promptInput">Meeting Topic / Context Keywords (Optional):</label>
+          <input type="text" id="promptInput" placeholder="e.g. Daily standup, technical discussion, architecture..." style="width: 100%; box-sizing: border-box; padding: 0.5rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 0.85rem;" />
+        </div>
+        <button id="btnStart" class="btn-primary">Start Meeting</button>
+        <button id="btnStop" class="btn-danger" style="display: none;">Stop Meeting</button>
+      </div>
+
+      <div class="card">
+        <h2>Live Audio Diagnostics</h2>
+        <div class="diagnostic-row"><span>Mic</span><span id="micLevelText">-- dBFS</span></div>
+        <div class="level-track"><div id="micLevelBar" class="level-bar"></div></div>
+        <div class="diagnostic-row"><span>Speaker loopback</span><span id="loopLevelText">-- dBFS</span></div>
+        <div class="level-track"><div id="loopLevelBar" class="level-bar incoming"></div></div>
+        <div class="diagnostic-row"><span>VB-CABLE render</span><span id="cableLevelText">-- dBFS</span></div>
+        <div class="level-track"><div id="cableLevelBar" class="level-bar cable"></div></div>
+        <div class="diagnostic-grid">
+          <span>Outgoing ASR</span><span id="outgoingAsrState">idle</span>
+          <span>Incoming ASR</span><span id="incomingAsrState">idle</span>
+          <span>Queue state</span><span id="queueState">--</span>
+        </div>
+        <div id="resolvedDeviceMap" class="resolved-map">No runtime endpoint mapping.</div>
+      </div>
+
+      <div class="card">
+        <h2>Telemetry & Latency</h2>
+        <div class="metrics-row">
+          <span>Incoming Partial (P50/P95):</span>
+          <span class="metric-val" id="latIncomingPartial">-- / -- ms</span>
+        </div>
+        <div class="metrics-row">
+          <span>Incoming Commit (P50/P95):</span>
+          <span class="metric-val" id="latIncomingCommit">-- / -- ms</span>
+        </div>
+        <div class="metrics-row">
+          <span>Outgoing Cloned PCM (P50/P95):</span>
+          <span class="metric-val" id="latOutgoingPcm">-- / -- ms</span>
+        </div>
+        <div class="metrics-row">
+          <span>MT Translation (P50):</span>
+          <span class="metric-val" id="latMT">-- ms</span>
+        </div>
+        <div class="metrics-row">
+          <span>VRAM Usage:</span>
+          <span class="metric-val" id="gpuVram">-- MB</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content / Dual Pipelines -->
+    <div class="main-content">
+      <!-- Outgoing Pipeline (TR -> EN Cloned Speech) -->
+      <div class="stream-panel">
+        <div class="card">
+          <h2>Outgoing: Turkish Mic ➔ English Cloned Speech (VB-CABLE)</h2>
+          <div id="outgoingBox" class="transcript-box">
+            <div class="utterance-partial" id="outgoingPartial">Waiting for speech...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Incoming Pipeline (EN application loopback -> TR subtitles) -->
+      <div class="stream-panel">
+        <div class="card">
+          <h2>Incoming: English Audio ➔ Live Turkish Subtitles</h2>
+          <div id="incomingBox" class="transcript-box">
+            <div class="utterance-partial" id="incomingPartial">Waiting for incoming audio...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

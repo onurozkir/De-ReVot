@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
-from teams_translator.asr.mock_backend import MockASRAdapter
-from teams_translator.core.types import Direction
-from teams_translator.translation.mock_backend import MockMTAdapter
-from teams_translator.tts.base import VoiceProfile
-from teams_translator.tts.mock_backend import MockTTSAdapter
+from voice_translator.asr.mock_backend import MockASRAdapter
+from voice_translator.core.types import Direction
+from voice_translator.translation.mock_backend import MockMTAdapter
+from voice_translator.tts.base import VoiceProfile
+from voice_translator.tts.mock_backend import MockTTSAdapter
 
 
 def test_mock_asr_adapter():

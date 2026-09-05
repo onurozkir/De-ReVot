@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from teams_translator.translation.ctranslate_backend import CTranslate2MTAdapter
+from voice_translator.translation.ctranslate_backend import CTranslate2MTAdapter
 
 print("=" * 65)
 print(" BENCHMARK B3: CTRANSLATE2 INT8 MT (OPUS / NLLB) TR <-> EN")

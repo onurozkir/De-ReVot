@@ -1,4 +1,4 @@
-from teams_translator.streaming.commit_policy import (
+from voice_translator.streaming.commit_policy import (
     CommitController,
     is_turkish_predicate_tail,
     is_open_conjunction_tail,

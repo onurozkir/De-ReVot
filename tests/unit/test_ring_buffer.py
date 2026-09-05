@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from teams_translator.core.ring_buffer import PCMRingBuffer
+from voice_translator.core.ring_buffer import PCMRingBuffer
 
 
 def test_ring_buffer_write_read():

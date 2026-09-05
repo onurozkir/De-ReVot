@@ -1,7 +1,7 @@
 import numpy as np
 
-from teams_translator.audio.signal import downmix_to_mono, pcm_to_float32, signal_levels
-from teams_translator.audio.diagnostic import dominant_frequency, frame_level_summary
+from voice_translator.audio.signal import downmix_to_mono, pcm_to_float32, signal_levels
+from voice_translator.audio.diagnostic import dominant_frequency, frame_level_summary
 
 
 def test_int16_scaling_maps_extremes_without_overflow():

@@ -12,9 +12,9 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from teams_translator.audio.diagnostic import capture_endpoint, frame_level_summary, write_pcm16_wav
-from teams_translator.audio.devices import AudioDeviceManager
-from teams_translator.config.loader import load_config
+from voice_translator.audio.diagnostic import capture_endpoint, frame_level_summary, write_pcm16_wav
+from voice_translator.audio.devices import AudioDeviceManager
+from voice_translator.config.loader import load_config
 
 
 def main() -> int:

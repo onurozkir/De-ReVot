@@ -13,11 +13,11 @@ import numpy as np
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
-from teams_translator.audio.devices import AudioDeviceManager
-from teams_translator.audio.capture import AudioCaptureEngine
-from teams_translator.audio.render import AudioRenderEngine
-from teams_translator.audio.signal import signal_levels
-from teams_translator.config.loader import load_config
+from voice_translator.audio.devices import AudioDeviceManager
+from voice_translator.audio.capture import AudioCaptureEngine
+from voice_translator.audio.render import AudioRenderEngine
+from voice_translator.audio.signal import signal_levels
+from voice_translator.config.loader import load_config
 
 
 def main() -> int:

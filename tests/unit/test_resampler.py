@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from teams_translator.audio.resampler import AudioResampler
+from voice_translator.audio.resampler import AudioResampler
 
 
 def test_resampler_rate_conversion():
