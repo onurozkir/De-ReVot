@@ -1,5 +1,5 @@
-from teams_translator.core.types import Direction, LatencyEvent
-from teams_translator.telemetry.metrics import TelemetryTracker
+from voice_translator.core.types import Direction, LatencyEvent
+from voice_translator.telemetry.metrics import TelemetryTracker
 
 
 def test_telemetry_percentiles():

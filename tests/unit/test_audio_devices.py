@@ -1,4 +1,4 @@
-from teams_translator.audio.devices import AudioDeviceManager, DeviceInfo
+from voice_translator.audio.devices import AudioDeviceManager, DeviceInfo
 
 
 def make_device(index: int, name: str, inputs: int, outputs: int, loopback: bool = False) -> DeviceInfo:

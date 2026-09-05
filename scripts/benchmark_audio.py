@@ -2,9 +2,9 @@
 
 import time
 import numpy as np
-from teams_translator.audio.devices import AudioDeviceManager
-from teams_translator.audio.capture import AudioCaptureEngine
-from teams_translator.audio.render import AudioRenderEngine
+from voice_translator.audio.devices import AudioDeviceManager
+from voice_translator.audio.capture import AudioCaptureEngine
+from voice_translator.audio.render import AudioRenderEngine
 
 print("=" * 60)
 print(" BENCHMARK B1: AUDIO CAPTURE & VB-CABLE RENDER TEST")

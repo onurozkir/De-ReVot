@@ -1,6 +1,6 @@
 import numpy as np
 
-from teams_translator.streaming.vad import SileroVAD
+from voice_translator.streaming.vad import SileroVAD
 
 
 def make_energy_vad() -> SileroVAD:

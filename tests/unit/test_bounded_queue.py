@@ -1,7 +1,7 @@
 """Unit tests for BoundedQueue policies."""
 
 import asyncio
-from teams_translator.core.bounded_queue import BoundedQueue
+from voice_translator.core.bounded_queue import BoundedQueue
 
 
 def test_bounded_queue_basic():
@@ -29,7 +29,7 @@ def test_bounded_queue_basic():
 
 def test_bounded_queue_reports_oldest_age_and_policy_snapshot(monkeypatch):
     ticks = iter((1_000_000_000, 1_005_000_000))
-    monkeypatch.setattr("teams_translator.core.bounded_queue.time.monotonic_ns", lambda: next(ticks))
+    monkeypatch.setattr("voice_translator.core.bounded_queue.time.monotonic_ns", lambda: next(ticks))
 
     async def _run():
         q: BoundedQueue[str] = BoundedQueue(maxsize=2)

@@ -1,11 +1,11 @@
-# Realtime Full-Duplex Turkish ↔ English & French MS Teams Translator with Voice Cloning
+# Realtime Voice Translator for Meetings and Games
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![CUDA 12.x](https://img.shields.io/badge/CUDA-12.x-green.svg)](https://developer.nvidia.com/cuda-toolkit)
 [![OS: Windows 11](https://img.shields.io/badge/OS-Windows%2011%20Native-orange.svg)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-A local, private, full-duplex speech-to-speech translator designed specifically for **Microsoft Teams, Zoom, and Google Meet** on Windows. 
+A local, private, full-duplex voice translator for **MS Teams, Zoom, Google Meet (Chrome / Edge), Discord, Slack Huddles, VRChat, Dota 2, PUBG and CS2** on native Windows. Application presets provide setup guidance over the same VB-CABLE and WASAPI audio paths. Per-application remote-call validation remains a separate hardware gate.
 
 Translate your speech live between **Turkish** and **English / French** while preserving your original identity through **cross-lingual voice cloning**.
 
@@ -13,13 +13,14 @@ Translate your speech live between **Turkish** and **English / French** while pr
 
 ## Key Features
 
-- **Turkish Mic ➔ Cloned English / French Speech (Outgoing)**: Speak in Turkish into your physical microphone. The system transcribes, translates, and synthesizes your speech in real-time using **your cloned voice** (or custom voice avatars), sending the cloned audio directly into Teams as your virtual microphone.
-- **English / French Teams ➔ Live Turkish Subtitles (Incoming)**: Automatically captures remote meeting audio directly from Windows WASAPI loopback and displays streaming, punctuated Turkish subtitles on your screen.
+- **Turkish Mic ➔ Cloned English / French Speech (Outgoing)**: Speak into your physical microphone; translated cloned speech reaches the target application's microphone through VB-CABLE.
+- **English Audio ➔ Live Turkish Subtitles (Incoming)**: Speaker loopback feeds subtitles to both the primary WhisperLiveKit Web UI and an automatic floating desktop HUD.
+- **Hands-free or Push-to-Talk**: Start Meeting starts both directions, including games. PTT gates only your microphone; incoming subtitles stay active. Default global keys: `V` to talk, `F9` to switch mode, `Ctrl+Shift+T` to pause/resume both directions, `Ctrl+Shift+M` for outgoing emergency mute.
 - **Zero-Shot Voice Cloning (XTTS-v2)**: Clone any voice from a clean 6–10 second reference `.wav` file. The cloned voice seamlessly speaks English and French with accurate prosody and natural intonation.
 - **Live Mid-Meeting Switching**:
-  - Switch voice avatars (e.g. *Personal Cloned Voice* ➔ *Anime Character Voice*) with **0 ms latency** during an active meeting.
+  - Switch voice profiles during a session; uncached conditioning must complete before the new profile is used.
   - Switch target language (e.g. **Turkish ➔ English** to **Turkish ➔ French**) on-the-fly without restarting or interrupting audio streams.
-- **100% Local & Private**: All inference (VAD, ASR, MT, TTS) runs locally on your GPU. No cloud APIs, no audio leaks, and zero recurring subscription costs.
+- **Local inference**: ASR and TTS use the GPU; default MT uses CPU INT8. No cloud translation service or recurring API subscription is required.
 - **Hardware-Aware Diagnostics**: Real-time dBFS audio meters for physical mic, WASAPI loopback, and VB-CABLE virtual render, along with P50/P95 end-to-end latency telemetry and VRAM monitoring.
 
 ---
@@ -29,7 +30,7 @@ Translate your speech live between **Turkish** and **English / French** while pr
 ### Hardware
 - **Operating System**: Windows 11 (64-bit) native execution (required for native WASAPI loopback capture).
 - **GPU**: NVIDIA GPU with CUDA support and at least **12 GB VRAM** (16 GB VRAM recommended).
-  - *Verified & benchmarked on*: NVIDIA GeForce RTX 5060 Ti (16 GB), RTX 4070 / 4080 / 4090, RTX 3060 (12 GB).
+  - Target hardware: NVIDIA GeForce RTX 5060 Ti (16 GB). See root `Plan.md` for measured results and remaining gates.
 - **RAM**: 16 GB minimum (32 GB recommended).
 - **Storage**: ~15 GB free NVMe / SSD disk space for offline model checkpoints.
 
@@ -43,17 +44,17 @@ Translate your speech live between **Turkish** and **English / French** while pr
 ## Architecture & Pipeline
 
 ```
-[ Physical Mic ] ──> [ Silero VAD ] ──> [ Whisper ASR ] ──> [ MarianMT / CTranslate2 ] ──> [ XTTS-v2 Voice Cloning ] ──> [ VB-CABLE Input ] ──> [ Teams Mic ]
+[ Physical Mic ] ──> [ VAD / PTT ] ──> [ Whisper ASR ] ──> [ CTranslate2 MT ] ──> [ XTTS-v2 Voice Cloning ] ──> [ VB-CABLE Input ] ──> [ App Mic ]
                                               │                         │                               │
                                       (Turkish Speech)          (English/French Text)           (Cloned Speech PCM)
 
-[ Teams Speaker ] ──> [ WASAPI Loopback ] ──> [ Whisper ASR ] ──> [ MarianMT / CTranslate2 ] ──> [ Live Subtitles Web UI ]
+[ App Speaker ] ──> [ WASAPI Loopback ] ──> [ Whisper ASR ] ──> [ CTranslate2 MT ] ──> [ Web UI + Desktop HUD ]
                                                     │                         │
                                             (Incoming Audio)          (Turkish Subtitles)
 ```
 
 - **VAD**: Silero VAD with speech envelope hysteresis and adaptive hangover to preserve natural Turkish SOV sentence structures.
-- **ASR**: OpenAI `whisper-large-v3-turbo` with prompt biasing and automated prefix stripping.
+- **ASR**: `openai/whisper-large-v3-turbo` or `Systran/faster-whisper-large-v3`, with acoustic evidence filtering and no phrase blacklist.
 - **MT**: Helsinki-NLP `opus-mt-tc-big-tr-en`, `opus-mt-tc-big-en-tr`, and `opus-mt-tr-fr` with CTranslate2 INT8 / HuggingFace MarianMT execution.
 - **TTS**: Coqui XTTS-v2 with persistent speaker latent caching.
 
@@ -106,6 +107,9 @@ python scripts/download_models.py xtts
 
 **Optional Additional Models:**
 ```powershell
+# Optional: Full large-v3 decoder, already in CTranslate2 format
+python scripts/download_models.py whisper-large-v3
+
 # Optional: Turkish -> French translation
 python scripts/download_models.py mt-tr-fr --convert-ct2
 
@@ -177,14 +181,107 @@ python scripts/convert_models_ct2.py --model models/mt/nllb-200-distilled-600M
 
 ---
 
-## Microsoft Teams Configuration
+## Application Setup
 
-Configure Microsoft Teams audio settings so that it uses the cloned audio output as your microphone:
+Every preset uses this same routing: translator input = physical microphone;
+translator render = **CABLE Input**; target app microphone = **CABLE Output**;
+target app speaker = physical headset; translator incoming = that headset's
+**[Loopback]** endpoint. The names Input and Output are from the cable driver's
+perspective. Presets guide these choices and never change Windows or game settings.
 
-1. In Teams, go to **Settings ➔ Devices**.
-2. **Microphone**: Select **CABLE Output (VB-Audio Virtual Cable)**.
-3. **Speaker**: Select your regular physical headphones or speakers (e.g. *Speakers / Headphones*).
-4. **Noise suppression in Teams**: Set to **Low** or **Off** (since XTTS-v2 generates clean PCM).
+| Application | Setup guidance |
+|---|---|
+| MS Teams | Devices: CABLE Output microphone, physical headset speaker. Check cloned speech in a test call. |
+| Zoom | Audio: CABLE Output microphone, headset speaker. Compare suppression settings if speech is clipped. |
+| Google Meet (Chrome / Edge) | Meet Audio settings: CABLE Output microphone, headset speaker. In Windows Volume mixer, route the browser to the same headset. This captures endpoint audio, not an isolated browser tab. |
+| Discord | Voice & Video: CABLE Output input, headset output. Use Voice Activity and adjust sensitivity/Krisp if translated speech is clipped. |
+| Slack Huddles | Audio & video: CABLE Output microphone, headset speaker. |
+| VRChat | Select CABLE Output input and headset output. Keep the game's microphone enabled during translated playback. |
+| Dota 2 / PUBG / CS2 | Select CABLE Output as voice input, or Windows default communications input where the game uses the default. Keep game voice input open while translation plays; use translator PTT to gate your physical mic. Use borderless window for the HUD. |
+
+Headset loopback also captures game effects, notifications and other audio on the
+same endpoint. The baseline does not isolate voice chat from game effects. A
+separate voice-output device can help when the game provides that setting.
+Process loopback would isolate incoming processes; it does not replace the
+outgoing virtual microphone, and is deferred here. No extra cable or paid
+translation service was added. See [Plan.md](Plan.md) §8.
+
+## Push-to-Talk and Desktop Subtitles
+
+Choose an Application preset and microphone mode, then click **Start Meeting**.
+Gaming presets default to PTT; meetings default to hands-free VAD. Both audio
+directions remain in the same session. Mode can change live using `F9` or the UI.
+
+PTT retains 150 ms of microphone pre-roll. Releasing the configured key requests
+the final decode immediately without an added VAD silence timer. ASR, MT and TTS
+still take time. Committed translated speech continues after key release, so using
+the same short PTT press in the game would clip that speech; use the game's open
+mic/voice-activity mode. When no committed speech is playing, VB-CABLE renders
+digital silence. The Web UI also has a hold-to-talk button with release on blur.
+
+The desktop HUD starts with the session by default. It is transparent, topmost,
+click-through and does not take keyboard focus. It shows the latest incoming
+translation and replaceable partial, then clears after inactivity. Toggle it live
+from the UI; Stop Meeting releases both the HUD window and global hooks. Settings
+for font size, width and bottom margin are in `[overlay]` in `config/local.toml`.
+It targets the primary desktop monitor and borderless/windowed games. Exclusive
+fullscreen, protected/anti-cheat surfaces and per-game compatibility are not
+guaranteed; the implementation does not inject into games or bypass protection.
+
+Emergency Mute clears outgoing buffered PCM and cancels older pending speech; it
+keeps incoming subtitles running. Pause suspends translation in both directions
+and resumes from new audio. Original incoming sound still reaches your headset.
+There is no raw-microphone fallback that could transmit speech unexpectedly.
+
+## Full large-v3 and Hallucination Filtering
+
+Download explicitly (never during startup or tests):
+
+```powershell
+uv sync
+uv run python scripts/download_models.py whisper-large-v3
+```
+
+Repository: `Systran/faster-whisper-large-v3`; pinned revision:
+`edaa852ec7e145841d8ffdb056a99866b5f0a478`; license: MIT; destination:
+`models/asr/whisper-large-v3/`. The downloader records provenance and SHA256 file
+checksums in `download-manifest.json`. No conversion is needed for this model.
+
+Refresh the Web UI, select **Faster Whisper large-v3**, and start a session. The
+model loads and warms before capture starts; the same weights serve both
+directions. To select it persistently, add to `config/local.toml`:
+
+```toml
+[asr]
+backend = "faster_whisper"
+model_path = "models/asr/whisper-large-v3"
+compute_type = "int8_float16" # CUDA; use int8 for CPU, or float16 for CUDA comparison
+```
+
+To return to turbo, select it in the UI or use `backend = "whisper_turbo"`,
+`model_path = "models/asr/whisper-large-v3-turbo"`, `compute_type = "float16"`.
+Absolute local model paths remain supported. Model changes apply between sessions.
+
+The guard checks voiced duration/ratio, audio age, confidence and letters/digits
+per voiced second (`streaming.guard_max_chars_per_second`, default 50). This is a
+tunable plausibility check, not a guarantee of zero hallucinations. Real speech
+such as “teşekkür ederim”, “abone ol” and “altyazı” is never removed merely because
+of its words. The model's larger decoder is a quality option; it can still make
+mistakes. The model card documents its [CTranslate2 format and precision options](https://huggingface.co/Systran/faster-whisper-large-v3).
+
+Compare the same local audio excerpt with both models:
+
+```powershell
+uv run python scripts/benchmark_asr_acoustics.py --model turbo --audio voices/onur-default/reference.wav --audio-offset 2 --audio-seconds 4 --output benchmarks/asr/results/turbo.json
+uv run python scripts/benchmark_asr_acoustics.py --model large_v3 --audio voices/onur-default/reference.wav --audio-offset 2 --audio-seconds 4 --output benchmarks/asr/results/large-v3.json
+```
+
+Reports separate raw output and guard acceptance, P50/P95, RTF, shared-ASR wait
+and whole-GPU VRAM. `--corpus` accepts a JSON array with `path` (relative to JSON),
+`language`, optional reference `text`, and `kind` (`speech` / `non_speech`). Supply
+real silence/breath/keyboard clips and genuine short phrases for quality gates.
+Synthetic negatives and an ASR-only comparison do not prove a live-call or
+30-minute full-duplex result. Without reference text, WER/CER remain UNKNOWN.
 
 ---
 
@@ -192,7 +289,7 @@ Configure Microsoft Teams audio settings so that it uses the cloned audio output
 
 1. Start the server:
    ```powershell
-   python src/teams_translator/main.py run
+   python src/voice_translator/main.py run
    ```
 2. Open your web browser and navigate to:
    ```
@@ -200,15 +297,20 @@ Configure Microsoft Teams audio settings so that it uses the cloned audio output
    ```
 3. Configure devices in the Web Dashboard:
    - **Physical Mic**: Your physical microphone.
-   - **Teams Audio (Loopback)**: Your physical headphones/speakers with `[Loopback]`.
+   - **Incoming Audio (Loopback)**: Your physical headphones/speakers with `[Loopback]`.
    - **VB-CABLE Render**: `CABLE Input (VB-Audio Virtual Cable)`.
    - **Voice Profile**: Choose your personal voice or an avatar voice.
    - **Outgoing Target Language**: Select `English (en)` or `Français (fr)`.
 4. Click **Start Meeting**.
 
+The Python package is now `voice_translator`, and the project skill lives at
+`.agents/skills/realtime-voice-translator/SKILL.md`. Use the new launch path above.
+`VOICE_TRANSLATOR_*` environment overrides take priority; legacy
+`TEAMS_TRANSLATOR_*` overrides and existing saved audio device choices still work.
+
 ### CPU / Mock Mode (For testing without GPU)
 ```powershell
-python src/teams_translator/main.py run --mock
+python src/voice_translator/main.py run --mock
 ```
 
 ---

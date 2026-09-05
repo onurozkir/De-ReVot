@@ -6,9 +6,9 @@ import time
 import numpy as np
 import torch
 
-from teams_translator.asr.whisper_backend import WhisperASRAdapter
-from teams_translator.asr import whisper_backend
-from teams_translator.core.types import Direction
+from voice_translator.asr.whisper_backend import WhisperASRAdapter
+from voice_translator.asr import whisper_backend
+from voice_translator.core.types import Direction
 
 
 def _run_scheduled_order(requests):
@@ -275,7 +275,7 @@ def test_flush_preserves_real_capture_span_and_resets_it_for_next_utterance():
 
 
 def test_strip_prompt_prefix():
-    from teams_translator.asr.whisper_backend import strip_prompt_prefix
+    from voice_translator.asr.whisper_backend import strip_prompt_prefix
 
     prompt = "Toplantı, Türkçe, teknik, iş, günlük konuşma."
     # Case 1: Exact prompt repeated by Whisper
@@ -290,3 +290,44 @@ def test_strip_prompt_prefix():
     # Case 3: Prompt not repeated
     raw3 = "Hava oldukça güzeldi."
     assert strip_prompt_prefix(raw3, prompt) == "Hava oldukça güzeldi."
+
+
+def test_empty_final_decode_does_not_revive_hallucinated_partial():
+    adapter = WhisperASRAdapter(min_audio_rms=0)
+    adapter._decode_audio = lambda *args, **kwargs: ("", {"no_speech_prob": 0.99})
+    session = adapter.create_session("tx", Direction.OUTGOING, "tr")
+    session.audio_buffer = [np.ones(4800, dtype=np.float32)]
+    session.total_audio_samples = 4800
+    session.last_partial_text = "Abone ol"
+    session.metadata["last_model_info"] = {"avg_logprob": -0.2}
+    assert adapter.flush_session(session) is None
+    assert session.total_audio_samples == 0
+
+
+def test_ct2_load_uses_absolute_local_path_and_requested_compute_type(monkeypatch, tmp_path):
+    (tmp_path / "model.bin").write_bytes(b"fixture")
+    received = {}
+    monkeypatch.setattr(whisper_backend, "WhisperModel", lambda **kwargs: received.update(kwargs) or object())
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    adapter = WhisperASRAdapter(backend_preference="faster_whisper")
+    adapter.initialize(str(tmp_path), compute_type="int8_float16")
+    assert received["model_size_or_path"] == str(tmp_path.resolve())
+    assert received["local_files_only"] is True
+    assert received["compute_type"] == "int8_float16"
+
+
+def test_ct2_unavailable_never_falls_back_to_huggingface(monkeypatch, tmp_path):
+    import pytest
+    (tmp_path / "model.bin").write_bytes(b"fixture")
+    monkeypatch.setattr(whisper_backend, "WhisperModel", None)
+    with pytest.raises(RuntimeError, match="faster-whisper is required"):
+        WhisperASRAdapter().initialize(str(tmp_path))
+
+
+def test_ct2_preserves_real_prompt_and_subtitle_words():
+    adapter = WhisperASRAdapter(min_audio_rms=0)
+    adapter.backend_type = "faster_whisper"
+    adapter.model = SimpleNamespace(transcribe=lambda *args, **kwargs: (
+        [SimpleNamespace(text="Altyazı hakkında konuşalım. Teşekkür ederim.")], SimpleNamespace()))
+    text, _ = adapter._decode_audio(np.ones(4800), "tr", prompt="Altyazı hakkında konuşalım.")
+    assert text == "Altyazı hakkında konuşalım. Teşekkür ederim."

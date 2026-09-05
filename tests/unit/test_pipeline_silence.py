@@ -2,17 +2,17 @@ import time
 
 import numpy as np
 
-from teams_translator.asr.mock_backend import MockASRAdapter
-from teams_translator.audio.devices import DeviceInfo
-from teams_translator.config.loader import load_config
-from teams_translator.core.types import Direction
-from teams_translator.streaming.pipeline_incoming import IncomingPipeline
-from teams_translator.streaming.pipeline_outgoing import OutgoingPipeline
-from teams_translator.streaming.vad import SileroVAD
-from teams_translator.streaming.vad import VADResult
-from teams_translator.translation.mock_backend import MockMTAdapter
-from teams_translator.tts.base import VoiceProfile
-from teams_translator.tts.mock_backend import MockTTSAdapter
+from voice_translator.asr.mock_backend import MockASRAdapter
+from voice_translator.audio.devices import DeviceInfo
+from voice_translator.config.loader import load_config
+from voice_translator.core.types import Direction
+from voice_translator.streaming.pipeline_incoming import IncomingPipeline
+from voice_translator.streaming.pipeline_outgoing import OutgoingPipeline
+from voice_translator.streaming.vad import SileroVAD
+from voice_translator.streaming.vad import VADResult
+from voice_translator.translation.mock_backend import MockMTAdapter
+from voice_translator.tts.base import VoiceProfile
+from voice_translator.tts.mock_backend import MockTTSAdapter
 
 
 class CountingASR(MockASRAdapter):

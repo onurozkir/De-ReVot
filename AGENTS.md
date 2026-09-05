@@ -1,11 +1,12 @@
 # Project
 
-Local, full-duplex MS Teams Turkish↔English translator: Turkish microphone to
-cloned English speech over VB-CABLE, and incoming English Teams audio to live
-Turkish text.
+Local, full-duplex voice translator for meetings and games: Turkish microphone
+to cloned English speech over VB-CABLE, and incoming English audio to live
+Turkish subtitles in the Web UI and desktop HUD.
 
 # Source of Truth
 
+- `Plan.md` is canonical.
 - `docs/research/` contains historical inputs, not current authority.
 - Direct user requests override the Plan; update the Plan and its DEC/REF
   traceability when an architectural decision changes.
@@ -35,7 +36,7 @@ If a task changes the reusable contract or workflow of a subsystem,
 update the corresponding skill.
 
 - Common Project agent workflow changed
-  → update `.agents/skills/teams-realtime-translator/SKILL.md`
+  → update `.agents/skills/realtime-voice-translator/SKILL.md`
 
 Read and apply this skill for planning,
 implementation, debugging, benchmarking, or review. Inspect the current
@@ -77,7 +78,7 @@ Prefer references to the canonical source.
 
 # Model Policy
 
-- Models are downloaded manually into the paths defined by docs/Plan.md.
+- Models are downloaded explicitly into the paths defined by root `Plan.md`.
 - Never silently download weights.
 - Record exact repository, revision, license, and destination.
 - External local models use configurable absolute paths and are not copied.
@@ -92,7 +93,7 @@ silently use the network or download a model.
 
 # Documentation Policy
 
-Keep architecture in docs/Plan.md rather than duplicating it here. Preserve
+Keep architecture in root `Plan.md` rather than duplicating it here. Preserve
 historical research files. Update the project skill if a reusable workflow
 contract changes. Final reports and explanations to the user are Turkish; code,
 identifiers, protocols, and filenames remain English.
@@ -109,7 +110,7 @@ requests normal mode. Compression must not omit technical or validation details.
 
 Implementation active (Phases B through J completed; Phases K through P tracked via Plan.md and GitHub issues).
 All production adapters, streaming pipelines, persistence, telemetry, and Web UI are operational.
-Consult `FILE_MAP.md` for subsystem architecture and active issue scope.
+Consult `FILE_MAP.md` and `Plan.md` for subsystem architecture and active issue scope.
 
 # Caveman
 

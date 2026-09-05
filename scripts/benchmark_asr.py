@@ -13,8 +13,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from teams_translator.asr.whisper_backend import WhisperASRAdapter
-from teams_translator.core.types import Direction
+from voice_translator.asr.whisper_backend import WhisperASRAdapter
+from voice_translator.core.types import Direction
 
 
 def _percentiles(values: list[float]) -> tuple[float, float]:

@@ -3,8 +3,8 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from teams_translator.tts.xtts_backend import XTTSv2Adapter
-from teams_translator.tts.conditioning import VoiceProfileManager
+from voice_translator.tts.xtts_backend import XTTSv2Adapter
+from voice_translator.tts.conditioning import VoiceProfileManager
 
 print("=" * 60)
 print(" BENCHMARK B4: XTTS-V2 VOICE CLONING TTS")

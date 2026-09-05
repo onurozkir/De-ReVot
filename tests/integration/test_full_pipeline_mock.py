@@ -1,10 +1,12 @@
 import asyncio
-from teams_translator.config.loader import load_config
-from teams_translator.core.types import MeetingStatus
-from teams_translator.streaming.orchestrator import MeetingOrchestrator
+import pytest
+from voice_translator.config.loader import load_config
+from voice_translator.core.types import MeetingStatus
+from voice_translator.streaming.orchestrator import MeetingOrchestrator
 
 
-def test_full_pipeline_lifecycle_mock(monkeypatch):
+@pytest.mark.parametrize("preset,mode", [("teams", "vad"), ("gaming", "ptt")])
+def test_full_pipeline_lifecycle_mock(monkeypatch, preset, mode):
     async def _run():
         config = load_config()
         config.audio.mic_device_id = ""
@@ -21,9 +23,17 @@ def test_full_pipeline_lifecycle_mock(monkeypatch):
         assert orchestrator.status == MeetingStatus.READY
 
         # 2. Start Meeting
-        await orchestrator.start_meeting()
+        await orchestrator.start_meeting(app_preset=preset, input_mode="auto")
         assert orchestrator.status == MeetingStatus.RUNNING
         assert orchestrator.current_meeting_id is not None
+        assert orchestrator.input_mode == mode
+        assert orchestrator.config.overlay.enabled
+
+        await orchestrator.update_controls(input_mode="ptt")
+        await orchestrator.update_controls(ptt_pressed=True)
+        await orchestrator.update_controls(ptt_pressed=False)
+        assert orchestrator.status == MeetingStatus.RUNNING
+        assert not orchestrator.paused
 
         # Wait 0.5s for async workers
         await asyncio.sleep(0.5)

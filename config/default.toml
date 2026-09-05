@@ -1,3 +1,21 @@
+[controls]
+app_preset = "teams"
+# auto: gaming presets use PTT; meeting presets use hands-free VAD.
+input_mode = "auto"
+ptt_key = "V"
+toggle_mode_key = "F9"
+pause_key = "Ctrl+Shift+T"
+mute_key = "Ctrl+Shift+M"
+ptt_preroll_ms = 150
+global_hotkeys = true
+
+[overlay]
+enabled = true
+font_size = 24
+width = 1000
+bottom_margin = 100
+expiry_sec = 8.0
+
 [server]
 host = "127.0.0.1"
 port = 8000
@@ -26,6 +44,8 @@ vad_energy_end_dbfs = -46.0
 guard_min_utterance_ms = 280.0
 guard_min_voiced_ms = 220.0
 guard_min_voiced_ratio = 0.25
+# Letters/digits per voiced second, excluding punctuation and spaces. No word blacklist.
+guard_max_chars_per_second = 50.0
 max_audio_queue_age_ms = 800.0
 whisper_max_no_speech_prob = 0.80
 whisper_min_avg_logprob = -1.20
@@ -41,6 +61,8 @@ max_tts_queue_size = 8
 
 [asr]
 backend = "whisper_turbo"
+# For full large-v3: backend = "faster_whisper", model_path = "models/asr/whisper-large-v3",
+# compute_type = "int8_float16" (CUDA) or "int8" (CPU). Download explicitly first.
 model_path = "models/asr/whisper-large-v3-turbo"
 device = "cuda"
 compute_type = "float16"

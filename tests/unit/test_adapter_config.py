@@ -1,11 +1,11 @@
 import asyncio
 from types import SimpleNamespace
 
-from teams_translator.config.loader import load_config
-from teams_translator.core.types import MeetingStatus
-from teams_translator.streaming import orchestrator as orchestrator_module
-from teams_translator.translation.ctranslate_backend import CTranslate2MTAdapter
-from teams_translator.tts.base import VoiceProfile
+from voice_translator.config.loader import load_config
+from voice_translator.core.types import MeetingStatus
+from voice_translator.streaming import orchestrator as orchestrator_module
+from voice_translator.translation.ctranslate_backend import CTranslate2MTAdapter
+from voice_translator.tts.base import VoiceProfile
 
 
 def test_ctranslate_uses_configured_beam_for_commits_and_greedy_partials():

@@ -30,7 +30,6 @@ config/local.toml
 .vscode/
 
 # Internal Planning & Docs
-Plan.md
 GEMINI.md
 mcp_servers.json
 .kilocodingrules
@@ -38,8 +37,8 @@ mcp_servers.json
 .antigravity/
 docs/
 
-# Agents: Ignore all except teams-realtime-translator
+# Agents: Track the canonical project workflow
 .agents/*
 !.agents/skills/
 .agents/skills/*
-!.agents/skills/teams-realtime-translator/
+!.agents/skills/realtime-voice-translator/

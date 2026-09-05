@@ -1,10 +1,10 @@
 import os
 import tempfile
 import pytest
-from teams_translator.config.models import PersistenceConfig
-from teams_translator.core.types import Direction, UtteranceEvent, UtteranceState
-from teams_translator.persistence.database import PersistenceWorker
-from teams_translator.persistence.schema import initialize_database
+from voice_translator.config.models import PersistenceConfig
+from voice_translator.core.types import Direction, UtteranceEvent, UtteranceState
+from voice_translator.persistence.database import PersistenceWorker
+from voice_translator.persistence.schema import initialize_database
 
 
 def test_schema_initialization():

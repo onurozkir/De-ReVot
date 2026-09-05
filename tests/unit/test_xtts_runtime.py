@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from teams_translator.tts import xtts_backend
-from teams_translator.tts.base import VoiceProfile
-from teams_translator.tts.conditioning import VoiceProfileManager
+from voice_translator.tts import xtts_backend
+from voice_translator.tts.base import VoiceProfile
+from voice_translator.tts.conditioning import VoiceProfileManager
 
 
 def test_coqui_xtts_runtime_imports_are_available():

@@ -14,15 +14,15 @@ sys.path.insert(0, str(SRC))
 
 import numpy as np
 
-from teams_translator.audio.diagnostic import (
+from voice_translator.audio.diagnostic import (
     capture_endpoint,
     dominant_frequency,
     frame_level_summary,
     write_pcm16_wav,
 )
-from teams_translator.audio.devices import AudioDeviceManager
-from teams_translator.audio.render import AudioRenderEngine
-from teams_translator.config.loader import load_config
+from voice_translator.audio.devices import AudioDeviceManager
+from voice_translator.audio.render import AudioRenderEngine
+from voice_translator.config.loader import load_config
 
 
 def main() -> int:

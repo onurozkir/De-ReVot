@@ -1,4 +1,4 @@
-from teams_translator.streaming.commit_policy import CommitController
+from voice_translator.streaming.commit_policy import CommitController
 
 
 def test_commit_punctuation():

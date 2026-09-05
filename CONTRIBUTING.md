@@ -37,7 +37,7 @@ All contributors and maintainers are expected to adhere to our [Code of Conduct]
 
 4. **Running with Mock Adapters** (No GPU required):
    ```powershell
-   python src/teams_translator/main.py run --mock
+   python src/voice_translator/main.py run --mock
    ```
 
 ---
