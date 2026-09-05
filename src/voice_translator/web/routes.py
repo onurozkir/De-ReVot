@@ -15,7 +15,8 @@ class StartMeetingRequest(BaseModel):
     loopback_id: Optional[str] = None
     render_id: Optional[str] = None
     voice_profile_id: Optional[str] = None
-    target_language: Optional[str] = "en"
+    source_language: Optional[str] = None
+    target_language: Optional[str] = None
     save_meeting: bool = False
     prompt: Optional[str] = None
     app_preset: Optional[str] = None
@@ -38,6 +39,11 @@ class SwitchVoiceRequest(BaseModel):
 
 
 class SwitchLanguageRequest(BaseModel):
+    target_language: str
+
+
+class SwitchLanguagesRequest(BaseModel):
+    source_language: str
     target_language: str
 
 
@@ -102,6 +108,14 @@ def create_routes(orchestrator: MeetingOrchestrator) -> APIRouter:
     async def get_session_options():
         return orchestrator.session_options()
 
+    @router.get("/languages")
+    async def get_languages():
+        source, target = orchestrator.source_language, orchestrator.target_language
+        return {
+            "languages": orchestrator.session_options()["languages"],
+            "defaults": {"source": source, "target": target},
+        }
+
     @router.post("/session/controls")
     async def set_session_controls(req: SessionControlsRequest):
         try:
@@ -117,7 +131,8 @@ def create_routes(orchestrator: MeetingOrchestrator) -> APIRouter:
                 loopback_id=req.loopback_id,
                 render_id=req.render_id,
                 voice_profile_id=req.voice_profile_id,
-                target_language=req.target_language or "en",
+                source_language=req.source_language,
+                target_language=req.target_language,
                 save_meeting=req.save_meeting,
                 context_prompt=req.prompt,
                 app_preset=req.app_preset,
@@ -135,6 +150,14 @@ def create_routes(orchestrator: MeetingOrchestrator) -> APIRouter:
         try:
             orchestrator.switch_voice_profile(req.profile_id)
             return {"status": "ok", "profile_id": req.profile_id}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post("/meeting/switch_languages")
+    async def switch_languages(req: SwitchLanguagesRequest):
+        try:
+            orchestrator.switch_languages(req.source_language, req.target_language)
+            return {"status": "ok", "source_language": req.source_language, "target_language": req.target_language}
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 

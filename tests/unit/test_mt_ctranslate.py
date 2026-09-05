@@ -7,11 +7,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from voice_translator.config.languages import resolve_model_dir
 from voice_translator.core.types import Direction, UtteranceEvent, UtteranceState
 from voice_translator.translation.ctranslate_backend import (
     CTranslate2MTAdapter,
     _apply_glossary,
-    _resolve_model_dir,
 )
 
 
@@ -43,7 +43,7 @@ def test_resolve_model_dir_prefers_ct2_when_available(tmp_path):
     ct2_dir.mkdir()
     (ct2_dir / "model.bin").write_text("dummy")
 
-    resolved = _resolve_model_dir(str(base_dir))
+    resolved = resolve_model_dir(str(base_dir))
     assert resolved == ct2_dir
 
 
@@ -70,8 +70,8 @@ def test_ctranslate_translates_with_glossary_and_eos():
     adapter = CTranslate2MTAdapter(beam_size=2)
     adapter.backend_type = "ctranslate2"
     adapter.model_family = "opus"
-    adapter.tr_en_translator = MockTranslator()
-    adapter.tr_en_tokenizer = MockTokenizer()
+    adapter.opus_pairs[("tr", "en")] = (MockTranslator(), MockTokenizer())
+    adapter.opus_backends[("tr", "en")] = "ctranslate2"
 
     glossary = {"Sound delay": "Audio latency"}
     res = adapter.translate(
@@ -89,7 +89,6 @@ def test_ctranslate_translates_with_glossary_and_eos():
 def test_translate_event_helper():
     adapter = CTranslate2MTAdapter(beam_size=2)
     adapter.translate = MagicMock(return_value="Hello world")
-
     event = UtteranceEvent(
         meeting_id="m1",
         stream_id="s1",
@@ -117,4 +116,60 @@ def test_translate_event_helper():
         context="Önceki cümle.",
         glossary={"test": "test"},
     )
+
+
+def test_missing_opus_pair_falls_back_to_nllb():
+    class MockNllbTokenizer:
+        eos_token = "</s>"
+        src_lang = "eng_Latn"
+
+        def tokenize(self, text):
+            return text.split()
+
+        def convert_tokens_to_ids(self, tokens):
+            return list(range(len(tokens)))
+
+        def decode(self, token_ids, skip_special_tokens=True):
+            return "Bonjour"
+
+    class MockNllbTranslator:
+        def translate_batch(self, batch, **kwargs):
+            assert kwargs.get("target_prefix") == [["fra_Latn"]]
+            return [SimpleNamespace(hypotheses=[["Bonjour"]])]
+
+    adapter = CTranslate2MTAdapter(beam_size=2)
+    adapter.unified_backend = "ctranslate2"
+    adapter.unified_translator = MockNllbTranslator()
+    adapter.unified_tokenizer = MockNllbTokenizer()
+
+    result = adapter.translate("Hello", source_lang="en", target_lang="fr")
+    assert result == "Bonjour"
+
+
+def test_opus_pair_preferred_over_nllb_when_installed():
+    class MockOpusTokenizer:
+        eos_token = "</s>"
+
+        def tokenize(self, text):
+            return text.split()
+
+        def convert_tokens_to_ids(self, tokens):
+            return list(range(len(tokens)))
+
+        def decode(self, token_ids, skip_special_tokens=True):
+            return "Merhaba"
+
+    class MockOpusTranslator:
+        def translate_batch(self, batch, beam_size=1):
+            return [SimpleNamespace(hypotheses=[["Merhaba"]])]
+
+    adapter = CTranslate2MTAdapter(beam_size=2)
+    adapter.opus_pairs[("en", "tr")] = (MockOpusTranslator(), MockOpusTokenizer())
+    adapter.opus_backends[("en", "tr")] = "ctranslate2"
+    adapter.unified_translator = MagicMock()
+    adapter.unified_tokenizer = MagicMock()
+
+    result = adapter.translate("Hello", source_lang="en", target_lang="tr")
+    assert result == "Merhaba"
+    adapter.unified_translator.translate_batch.assert_not_called()
 

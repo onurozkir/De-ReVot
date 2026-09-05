@@ -14,6 +14,7 @@
 | **Universal session controls / PTT** | `src/voice_translator/streaming/input_control.py`<br>`src/voice_translator/streaming/pipeline_outgoing.py` | `tests/unit/test_input_control.py`<br>`tests/unit/test_pipeline_ptt.py` | Meeting/PTT modes, timestamped key boundaries, bounded pre-roll, release flush, emergency mute. |
 | **Windows desktop HUD / hotkeys** | `src/voice_translator/desktop/overlay.py`<br>`src/voice_translator/desktop/hotkeys.py` | `tests/unit/test_desktop.py`<br>`scripts/smoke_desktop.py` (explicit hardware check) | Native global controls, click-through topmost subtitles, lifecycle cleanup. |
 | **Application / ASR presets** | `src/voice_translator/config/presets.py`<br>`src/voice_translator/config/models.py` | `tests/unit/test_universal_config.py` | Platform setup guidance, mode defaults, offline ASR selection. |
+| **Dynamic languages / MT pair registry** | `src/voice_translator/config/languages.py`<br>`src/voice_translator/translation/ctranslate_backend.py`<br>`src/voice_translator/streaming/orchestrator.py` | `tests/unit/test_languages.py`<br>`tests/unit/test_mt_ctranslate.py`<br>`tests/integration/test_web_api.py` | Declarative `[languages]` registry, enabled-language validation, OPUS/NLLB pair routing, live source/target switching, XTTS matrix gate. |
 | **Model download / ASR comparison** | `scripts/download_models.py`<br>`scripts/benchmark_asr_acoustics.py` | `tests/unit/test_model_download.py` | Explicit pinned downloads with provenance; offline acoustic/latency comparison. |
 | **Product naming / launch** | `src/voice_translator/main.py`<br>`pyproject.toml` | Existing adapter, pipeline, API tests | Package/CLI migration, `.gitignore` + `uv.lock`, `README.md`, `CONTRIBUTING.md`, canonical `Plan.md` + project skill. Mechanical import edits stay within mapped source, tests and scripts; historical `docs/research/` stays unchanged. |
 | **VAD, Endpointing & SOV Logic** | `src/voice_translator/streaming/commit_policy.py`<br>`src/voice_translator/streaming/vad.py` | `tests/unit/test_commit_sov.py`<br>`tests/unit/test_commit_policy.py`<br>`tests/unit/test_vad.py` | Turkish SOV verb detection, 200 ms silence commit, conjunction holding, deverbal noun protection, Silero VAD state. |
@@ -52,8 +53,10 @@ src/voice_translator/
 │   └── diagnostic.py           # Audio pipeline diagnostics and calibration
 │
 ├── config/                     # Configuration schema & loading
-│   ├── models.py               # Pydantic/Dataclass config schemas (Audio, ASR, Translation, TTS, etc.)
-│   └── loader.py               # TOML loader with environment and local override support
+│   ├── models.py               # Pydantic/Dataclass config schemas (Audio, ASR, Translation, TTS, Languages, etc.)
+│   ├── loader.py               # TOML loader with environment and local override support
+│   ├── presets.py              # Application and ASR preset tables
+│   └── languages.py            # Declarative language registry, pair routing, XTTS matrix
 │
 ├── core/                       # Core primitives, data structures, and errors
 │   ├── types.py                # Core enums & dataclasses (MeetingStatus, Direction, UtteranceEvent, LatencyEvent)

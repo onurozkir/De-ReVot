@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
+from voice_translator.config.languages import NLLB_FLORES, resolve_model_dir
 from voice_translator.core.errors import ModelNotFoundError, WarmupError
 from voice_translator.translation.base import MTAdapter
 
@@ -27,27 +28,6 @@ try:
 except ImportError:
     AutoModelForSeq2SeqLM = None  # type: ignore
     AutoTokenizer = None  # type: ignore
-
-FLORES_LANG_MAP: Dict[str, str] = {
-    "tr": "tur_Latn",
-    "en": "eng_Latn",
-    "fr": "fra_Latn",
-    "de": "deu_Latn",
-    "es": "spa_Latn",
-    "ja": "jpn_Jpan",
-    "uk": "ukr_Cyrl",
-}
-
-
-def _resolve_model_dir(path_str: str) -> Path:
-    """Resolve model path, preferring -ct2 converted directory if present."""
-    p = Path(path_str)
-    if (p / "model.bin").exists():
-        return p
-    ct2_p = Path(f"{path_str}-ct2")
-    if (ct2_p / "model.bin").exists():
-        return ct2_p
-    return p
 
 
 def _apply_glossary(text: str, glossary: Optional[Dict[str, str]]) -> str:
@@ -72,20 +52,23 @@ def _load_tokenizer(path: Path):
         return MarianTokenizer.from_pretrained(str(path.resolve()), local_files_only=True)
 
 
+def _load_ct2_translator(path: Path, device: str, compute_type: str):
+    if ctranslate2 is None:
+        raise RuntimeError("ctranslate2 is required for this CTranslate2 MT model. Run uv sync.")
+    return ctranslate2.Translator(str(path.resolve()), device=device, compute_type=compute_type)
+
+
 class CTranslate2MTAdapter(MTAdapter):
-    """MT Adapter supporting CTranslate2 INT8 or Hugging Face MarianMT/NLLB."""
+    """MT Adapter routing language pairs to dedicated OPUS models with NLLB fallback."""
 
     def __init__(self, beam_size: int = 2):
-        self.tr_en_translator: Optional[Any] = None
-        self.en_tr_translator: Optional[Any] = None
-        self.tr_fr_translator: Optional[Any] = None
-        self.unified_translator: Optional[Any] = None  # For multilingual models like NLLB
-        self.tr_en_tokenizer: Optional[Any] = None
-        self.en_tr_tokenizer: Optional[Any] = None
-        self.tr_fr_tokenizer: Optional[Any] = None
+        self.opus_pairs: Dict[Tuple[str, str], Tuple[Any, Any]] = {}
+        self.opus_backends: Dict[Tuple[str, str], str] = {}
+        self.unified_translator: Optional[Any] = None  # NLLB-200 multilingual model
         self.unified_tokenizer: Optional[Any] = None
-        self.backend_type: str = "transformers"  # "ctranslate2" or "transformers"
-        self.model_family: str = "opus"  # "opus" or "nllb"
+        self.unified_backend: str = "transformers"
+        self.backend_type: str = "transformers"  # dominant backend for telemetry
+        self.model_family: str = "opus"  # "opus", "nllb", or "hybrid"
         self.device = "cpu"
         self.compute_type = "int8"
         self.beam_size = max(1, int(beam_size))
@@ -93,147 +76,92 @@ class CTranslate2MTAdapter(MTAdapter):
 
     def initialize(
         self,
-        tr_en_model_path: str,
-        en_tr_model_path: str,
-        tr_fr_model_path: Optional[str] = "models/mt/opus-mt-tr-fr",
+        *,
+        pair_paths: Optional[Dict[str, str]] = None,
         nllb_model_path: Optional[str] = None,
+        languages: Optional[Dict[str, Any]] = None,
         device: str = "cpu",
         compute_type: str = "int8",
     ):
         self.device = device
         self.compute_type = compute_type
+        loaded_opus = False
 
-        # Check if NLLB multilingual model is requested or available
+        for pair_key, path_str in (pair_paths or {}).items():
+            parts = pair_key.split("-", 1)
+            if len(parts) != 2:
+                logger.warning("Skipping malformed MT pair key '%s'", pair_key)
+                continue
+            pair = (parts[0].strip().lower(), parts[1].strip().lower())
+            p = resolve_model_dir(path_str)
+            if not p.exists():
+                continue
+            self._load_opus_pair(pair, p)
+            loaded_opus = True
+
         if nllb_model_path:
-            p_nllb = _resolve_model_dir(nllb_model_path)
+            p_nllb = resolve_model_dir(nllb_model_path)
             if p_nllb.exists():
-                self._initialize_nllb(p_nllb, device, compute_type)
-                return
+                self._load_nllb(p_nllb)
 
-        # Otherwise initialize dedicated bilingual OPUS-MT models
-        self._initialize_opus(tr_en_model_path, en_tr_model_path, tr_fr_model_path, device, compute_type)
-
-    def _initialize_nllb(self, p_nllb: Path, device: str, compute_type: str):
-        self.model_family = "nllb"
-        has_ct2 = (p_nllb / "model.bin").exists()
-
-        if has_ct2 and ctranslate2 is not None and AutoTokenizer is not None:
-            self.backend_type = "ctranslate2"
-            logger.info("Loading CTranslate2 NLLB-200 model from '%s' (%s, %s)...", p_nllb, device, compute_type)
-            self.unified_translator = ctranslate2.Translator(
-                str(p_nllb.resolve()),
-                device=device,
-                compute_type=compute_type,
-            )
-            self.unified_tokenizer = _load_tokenizer(p_nllb)
-        else:
-            self.backend_type = "transformers"
-            if AutoModelForSeq2SeqLM is None or AutoTokenizer is None:
-                raise RuntimeError("transformers is required for HuggingFace MT models.")
-            logger.info("Loading HuggingFace NLLB-200 model from '%s'...", p_nllb)
-            self.unified_tokenizer = _load_tokenizer(p_nllb)
-            self.unified_translator = AutoModelForSeq2SeqLM.from_pretrained(str(p_nllb.resolve()), local_files_only=True)
-            if device == "cuda" and torch is not None and torch.cuda.is_available():
-                self.unified_translator.to("cuda")
-
-        logger.info("NLLB-200 MT loaded successfully (backend: %s).", self.backend_type)
-
-    def _initialize_opus(
-        self,
-        tr_en_model_path: str,
-        en_tr_model_path: str,
-        tr_fr_model_path: Optional[str],
-        device: str,
-        compute_type: str,
-    ):
-        self.model_family = "opus"
-        p_tr_en = _resolve_model_dir(tr_en_model_path)
-        p_en_tr = _resolve_model_dir(en_tr_model_path)
-
-        if not p_tr_en.exists():
+        if not loaded_opus and self.unified_translator is None:
             raise ModelNotFoundError(
-                f"TR->EN MT model path '{tr_en_model_path}' not found. "
-                "Models must be downloaded manually."
+                "No MT model directories found. Download at least one bilingual "
+                "OPUS pair or NLLB-200: uv run python scripts/download_models.py --lang tr "
+                "or mt-nllb-200."
             )
-        if not p_en_tr.exists():
-            raise ModelNotFoundError(
-                f"EN->TR MT model path '{en_tr_model_path}' not found. "
-                "Models must be downloaded manually."
-            )
-
-        has_ct2 = (
-            (p_tr_en / "model.bin").exists()
-            and ((p_tr_en / "shared_vocabulary.json").exists() or (p_tr_en / "source_vocabulary.json").exists())
+        self.model_family = "nllb" if (not loaded_opus and self.unified_translator is not None) else (
+            "hybrid" if (loaded_opus and self.unified_translator is not None) else "opus"
+        )
+        logger.info(
+            "MT models loaded (family: %s, opus pairs: %s, nllb: %s).",
+            self.model_family, sorted(f"{s}-{t}" for s, t in self.opus_pairs),
+            "yes" if self.unified_translator is not None else "no",
         )
 
+    def _load_opus_pair(self, pair: Tuple[str, str], p: Path) -> None:
+        has_ct2 = (
+            (p / "model.bin").exists()
+            and ((p / "shared_vocabulary.json").exists() or (p / "source_vocabulary.json").exists())
+        )
         if has_ct2 and ctranslate2 is not None and AutoTokenizer is not None:
-            self.backend_type = "ctranslate2"
-            logger.info("Loading CTranslate2 TR->EN model from '%s' (%s, %s)...", p_tr_en, device, compute_type)
-            self.tr_en_translator = ctranslate2.Translator(
-                str(p_tr_en.resolve()),
-                device=device,
-                compute_type=compute_type,
-            )
-            self.tr_en_tokenizer = _load_tokenizer(p_tr_en)
-
-            logger.info("Loading CTranslate2 EN->TR model from '%s' (%s, %s)...", p_en_tr, device, compute_type)
-            self.en_tr_translator = ctranslate2.Translator(
-                str(p_en_tr.resolve()),
-                device=device,
-                compute_type=compute_type,
-            )
-            self.en_tr_tokenizer = _load_tokenizer(p_en_tr)
+            logger.info("Loading CTranslate2 OPUS %s->%s from '%s' (%s, %s)...",
+                        pair[0], pair[1], p, self.device, self.compute_type)
+            self.opus_pairs[pair] = (_load_ct2_translator(p, self.device, self.compute_type), _load_tokenizer(p))
+            self.opus_backends[pair] = "ctranslate2"
+        elif AutoModelForSeq2SeqLM is not None and AutoTokenizer is not None:
+            logger.info("Loading HuggingFace MarianMT %s->%s from '%s'...", pair[0], pair[1], p)
+            tokenizer = _load_tokenizer(p)
+            translator = AutoModelForSeq2SeqLM.from_pretrained(str(p.resolve()), local_files_only=True)
+            if self.device == "cuda" and torch is not None and torch.cuda.is_available():
+                translator.to("cuda")
+            self.opus_pairs[pair] = (translator, tokenizer)
+            self.opus_backends[pair] = "transformers"
         else:
-            self.backend_type = "transformers"
-            if AutoModelForSeq2SeqLM is None or AutoTokenizer is None:
-                raise RuntimeError("transformers is required for HuggingFace MT models.")
+            logger.warning("MT model at '%s' cannot be loaded (missing runtime).", p)
 
-            logger.info("Loading HuggingFace MarianMT TR->EN from '%s'...", p_tr_en)
-            self.tr_en_tokenizer = _load_tokenizer(p_tr_en)
-            self.tr_en_translator = AutoModelForSeq2SeqLM.from_pretrained(str(p_tr_en.resolve()), local_files_only=True)
-
-            logger.info("Loading HuggingFace MarianMT EN->TR from '%s'...", p_en_tr)
-            self.en_tr_tokenizer = _load_tokenizer(p_en_tr)
-            self.en_tr_translator = AutoModelForSeq2SeqLM.from_pretrained(str(p_en_tr.resolve()), local_files_only=True)
-
-            if device == "cuda" and torch is not None and torch.cuda.is_available():
-                self.tr_en_translator.to("cuda")
-                self.en_tr_translator.to("cuda")
-
-        # Optional TR->FR model loading
-        if tr_fr_model_path:
-            p_tr_fr = _resolve_model_dir(tr_fr_model_path)
-            if p_tr_fr.exists():
-                logger.info("Loading TR->FR translation model from '%s'...", p_tr_fr)
-                has_ct2_fr = (p_tr_fr / "model.bin").exists() and (
-                    (p_tr_fr / "shared_vocabulary.json").exists() or (p_tr_fr / "source_vocabulary.json").exists()
-                )
-                if has_ct2_fr and ctranslate2 is not None and AutoTokenizer is not None:
-                    self.tr_fr_translator = ctranslate2.Translator(
-                        str(p_tr_fr.resolve()),
-                        device=device,
-                        compute_type=compute_type,
-                    )
-                    self.tr_fr_tokenizer = _load_tokenizer(p_tr_fr)
-                elif AutoModelForSeq2SeqLM is not None and AutoTokenizer is not None:
-                    self.tr_fr_tokenizer = _load_tokenizer(p_tr_fr)
-                    self.tr_fr_translator = AutoModelForSeq2SeqLM.from_pretrained(str(p_tr_fr.resolve()), local_files_only=True)
-                    if device == "cuda" and torch is not None and torch.cuda.is_available():
-                        self.tr_fr_translator.to("cuda")
-                logger.info("TR->FR translation model loaded successfully.")
-            else:
-                logger.info(
-                    "TR->FR model '%s' not found. Run 'python scripts/download_models.py mt-tr-fr' to enable French translation.",
-                    tr_fr_model_path,
-                )
-
-        logger.info("MT models loaded successfully (family: %s, backend: %s).", self.model_family, self.backend_type)
+    def _load_nllb(self, p_nllb: Path) -> None:
+        has_ct2 = (p_nllb / "model.bin").exists()
+        if has_ct2 and ctranslate2 is not None and AutoTokenizer is not None:
+            self.unified_backend = "ctranslate2"
+            logger.info("Loading CTranslate2 NLLB-200 from '%s' (%s, %s)...", p_nllb, self.device, self.compute_type)
+            self.unified_translator = _load_ct2_translator(p_nllb, self.device, self.compute_type)
+            self.unified_tokenizer = _load_tokenizer(p_nllb)
+        elif AutoModelForSeq2SeqLM is not None and AutoTokenizer is not None:
+            self.unified_backend = "transformers"
+            logger.info("Loading HuggingFace NLLB-200 from '%s'...", p_nllb)
+            self.unified_tokenizer = _load_tokenizer(p_nllb)
+            self.unified_translator = AutoModelForSeq2SeqLM.from_pretrained(str(p_nllb.resolve()), local_files_only=True)
+            if self.device == "cuda" and torch is not None and torch.cuda.is_available():
+                self.unified_translator.to("cuda")
+        else:
+            logger.warning("NLLB model at '%s' cannot be loaded (missing runtime).", p_nllb)
+        if self.unified_translator is not None:
+            self.backend_type = self.unified_backend
 
     def warmup(self):
-        if self.model_family == "nllb" and self.unified_translator is None:
-            raise WarmupError("NLLB model not initialized before warmup.")
-        if self.model_family == "opus" and (self.tr_en_translator is None or self.en_tr_translator is None):
-            raise WarmupError("OPUS models not initialized before warmup.")
+        if not self.opus_pairs and self.unified_translator is None:
+            raise WarmupError("No MT models initialized before warmup.")
         try:
             logger.info("Warming up MT models...")
             _ = self.translate("Merhaba dünya", "tr", "en")
@@ -259,16 +187,21 @@ class CTranslate2MTAdapter(MTAdapter):
         source_lang = source_lang.lower().split("-")[0]
         target_lang = target_lang.lower().split("-")[0]
 
-        # Apply pre-translation glossary terms if available
         working_text = _apply_glossary(text, glossary)
 
         try:
-            if self.model_family == "nllb":
+            pair = (source_lang, target_lang)
+            if pair in self.opus_pairs:
+                result = self._translate_opus(working_text, pair, is_partial)
+            elif self.unified_translator is not None:
                 result = self._translate_nllb(working_text, source_lang, target_lang, is_partial, context)
             else:
-                result = self._translate_opus(working_text, source_lang, target_lang, is_partial, context)
+                logger.warning(
+                    "No offline MT model for %s->%s. Download the pair or NLLB-200.",
+                    source_lang, target_lang,
+                )
+                return text
 
-            # Apply post-translation glossary alignment
             if glossary:
                 result = _apply_glossary(result, glossary)
             return result
@@ -276,36 +209,12 @@ class CTranslate2MTAdapter(MTAdapter):
             logger.error("MT translation error (%s->%s): %s", source_lang, target_lang, e)
             return text
 
-    def _translate_opus(
-        self,
-        text: str,
-        source_lang: str,
-        target_lang: str,
-        is_partial: bool,
-        context: Optional[str] = None,
-    ) -> str:
-        if source_lang.startswith("tr") and target_lang.startswith("en"):
-            translator = self.tr_en_translator
-            tokenizer = self.tr_en_tokenizer
-        elif source_lang.startswith("tr") and target_lang.startswith("fr"):
-            translator = self.tr_fr_translator
-            tokenizer = self.tr_fr_tokenizer
-            if translator is None:
-                logger.warning("TR->FR model not loaded yet. Falling back to original text.")
-                return text
-        elif source_lang.startswith("en") and target_lang.startswith("tr"):
-            translator = self.en_tr_translator
-            tokenizer = self.en_tr_tokenizer
-        else:
-            logger.warning("Unsupported OPUS language pair: %s->%s", source_lang, target_lang)
-            return text
-
-        if translator is None or tokenizer is None:
-            return text
-
+    def _translate_opus(self, text: str, pair: Tuple[str, str], is_partial: bool) -> str:
+        translator, tokenizer = self.opus_pairs[pair]
+        backend = self.opus_backends[pair]
         beam_size = 1 if is_partial else self.beam_size
 
-        if self.backend_type == "ctranslate2":
+        if backend == "ctranslate2":
             if hasattr(tokenizer, "tokenize"):
                 tokens = tokenizer.tokenize(text)
             elif hasattr(tokenizer, "encode") and hasattr(tokenizer, "convert_ids_to_tokens"):
@@ -331,28 +240,28 @@ class CTranslate2MTAdapter(MTAdapter):
             except TypeError:
                 out_text = tokenizer.decode(token_ids)
             return out_text.strip()
-        else:
-            # HuggingFace MarianMT inference
-            inputs = tokenizer(text, return_tensors="pt", padding=True)
-            if self.device == "cuda" and torch is not None and torch.cuda.is_available():
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
 
-            if torch is not None:
-                with torch.inference_mode():
-                    translated_tokens = translator.generate(
-                        **inputs,
-                        max_length=128,
-                        num_beams=beam_size,
-                    )
-            else:
+        # HuggingFace MarianMT inference
+        inputs = tokenizer(text, return_tensors="pt", padding=True)
+        if self.device == "cuda" and torch is not None and torch.cuda.is_available():
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+
+        if torch is not None:
+            with torch.inference_mode():
                 translated_tokens = translator.generate(
                     **inputs,
                     max_length=128,
                     num_beams=beam_size,
                 )
+        else:
+            translated_tokens = translator.generate(
+                **inputs,
+                max_length=128,
+                num_beams=beam_size,
+            )
 
-            out_text = tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
-            return out_text[0].strip() if out_text else text
+        out_text = tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+        return out_text[0].strip() if out_text else text
 
     def _translate_nllb(
         self,
@@ -367,14 +276,13 @@ class CTranslate2MTAdapter(MTAdapter):
         if translator is None or tokenizer is None:
             return text
 
-        src_code = FLORES_LANG_MAP.get(source_lang, "tur_Latn")
-        tgt_code = FLORES_LANG_MAP.get(target_lang, "eng_Latn")
+        src_code = NLLB_FLORES.get(source_lang, source_lang)
+        tgt_code = NLLB_FLORES.get(target_lang, target_lang)
         beam_size = 1 if is_partial else self.beam_size
 
-        # If discourse context exists, prime input
         input_text = f"{context} {text}" if context and not is_partial else text
 
-        if self.backend_type == "ctranslate2":
+        if self.unified_backend == "ctranslate2":
             tokenizer.src_lang = src_code
             tokens = tokenizer.tokenize(input_text)
             if not tokens:
@@ -391,45 +299,40 @@ class CTranslate2MTAdapter(MTAdapter):
             )
             out_tokens = results[0].hypotheses[0]
             out_text = tokenizer.decode(tokenizer.convert_tokens_to_ids(out_tokens), skip_special_tokens=True)
-            # If context was primed, take only the translation of the second sentence if applicable
             if context and not is_partial and "." in out_text:
                 parts = [p.strip() for p in out_text.split(".") if p.strip()]
                 if len(parts) >= 2:
                     out_text = parts[-1]
             return out_text.strip()
-        else:
-            tokenizer.src_lang = src_code
-            inputs = tokenizer(input_text, return_tensors="pt")
-            if self.device == "cuda" and torch is not None and torch.cuda.is_available():
-                inputs = {k: v.to("cuda") for k, v in inputs.items()}
 
-            forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_code)
-            if torch is not None:
-                with torch.inference_mode():
-                    translated_tokens = translator.generate(
-                        **inputs,
-                        forced_bos_token_id=forced_bos_token_id,
-                        max_length=128,
-                        num_beams=beam_size,
-                    )
-            else:
+        tokenizer.src_lang = src_code
+        inputs = tokenizer(input_text, return_tensors="pt")
+        if self.device == "cuda" and torch is not None and torch.cuda.is_available():
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+
+        forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_code)
+        if torch is not None:
+            with torch.inference_mode():
                 translated_tokens = translator.generate(
                     **inputs,
                     forced_bos_token_id=forced_bos_token_id,
                     max_length=128,
                     num_beams=beam_size,
                 )
+        else:
+            translated_tokens = translator.generate(
+                **inputs,
+                forced_bos_token_id=forced_bos_token_id,
+                max_length=128,
+                num_beams=beam_size,
+            )
 
-            out_text = tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
-            return out_text[0].strip() if out_text else text
+        out_text = tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+        return out_text[0].strip() if out_text else text
 
     def shutdown(self):
-        self.tr_en_translator = None
-        self.en_tr_translator = None
-        self.tr_fr_translator = None
+        self.opus_pairs = {}
+        self.opus_backends = {}
         self.unified_translator = None
-        self.tr_en_tokenizer = None
-        self.en_tr_tokenizer = None
-        self.tr_fr_tokenizer = None
         self.unified_tokenizer = None
         self._is_warm = False

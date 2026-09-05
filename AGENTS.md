@@ -108,7 +108,7 @@ requests normal mode. Compression must not omit technical or validation details.
 
 # Current Phase
 
-Implementation active (Phases B through J completed; Phases K through P tracked via Plan.md and GitHub issues).
+Implementation active (Phases B through K completed for TR/EN/FR; Phases L through P tracked via Plan.md and GitHub issues).
 All production adapters, streaming pipelines, persistence, telemetry, and Web UI are operational.
 Consult `FILE_MAP.md` and `Plan.md` for subsystem architecture and active issue scope.
 

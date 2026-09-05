@@ -285,6 +285,54 @@ Synthetic negatives and an ASR-only comparison do not prove a live-call or
 
 ---
 
+## Dynamic Languages (Konuştuğum Dil / Toplantı Dili)
+
+The Web UI has two live-switchable selectors:
+
+- **Konuştuğum Dil**: ASR language of your microphone and the display language of
+  incoming subtitles.
+- **Toplantı Dili / Hedef Dil**: language of the cloned speech sent to the meeting
+  and the ASR language of the meeting loopback.
+
+Defaults are `tr` (source) and `en` (target). Switching during an active meeting
+immediately updates ASR sessions, MT routing and the TTS target language; the
+current partial utterance resets so languages never mix mid-sentence. The Web UI
+disables target options whose offline models are missing or which XTTS-v2 cannot
+synthesize.
+
+### Adding a new language
+
+1. Add its definition and enable it in `config/default.toml`:
+
+   ```toml
+   [languages]
+   enabled = ["tr", "en", "fr", "de"]
+
+   [languages.definitions.de]
+   name = "Deutsch"
+   whisper_code = "de"
+   nllb_code = "deu_Latn"
+   xtts_supported = true
+   asr_prompt = "Besprechung, Deutsch, technisch, geschäftlich."
+   ```
+
+2. Download its MT pairs (pinned OPUS pairs when known, NLLB-200 fallback
+   otherwise; never during startup):
+
+   ```powershell
+   uv run python scripts/download_models.py --lang de
+   ```
+
+3. Refresh the Web UI. The new language appears in both selectors.
+
+Pair routing: a pair uses its pinned OPUS model (e.g. `tr-en` = TC-Big) when the
+directory exists and falls back to NLLB-200 (`models/mt/nllb-200-distilled-600M`)
+for any other pair. NLLB-200 is CC-BY-NC — fine for personal use. XTTS-v2
+synthesizes `en, tr, fr, de, es, it, pt, pl, ru, nl, cs, ar, zh-cn, ja, hu, ko, hi`;
+other target languages are rejected before the session starts.
+
+---
+
 ## Running the Application
 
 1. Start the server:
@@ -300,7 +348,8 @@ Synthetic negatives and an ASR-only comparison do not prove a live-call or
    - **Incoming Audio (Loopback)**: Your physical headphones/speakers with `[Loopback]`.
    - **VB-CABLE Render**: `CABLE Input (VB-Audio Virtual Cable)`.
    - **Voice Profile**: Choose your personal voice or an avatar voice.
-   - **Outgoing Target Language**: Select `English (en)` or `Français (fr)`.
+   - **Konuştuğum Dil**: Source language you speak (default `tr`).
+   - **Toplantı Dili / Hedef Dil**: Language the meeting hears and you read as subtitles (default `en`).
 4. Click **Start Meeting**.
 
 The Python package is now `voice_translator`, and the project skill lives at

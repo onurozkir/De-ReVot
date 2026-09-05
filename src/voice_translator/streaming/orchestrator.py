@@ -12,6 +12,14 @@ from voice_translator.asr.base import ASRAdapter, ASRSession
 from voice_translator.asr.mock_backend import MockASRAdapter
 from voice_translator.asr.whisper_backend import WhisperASRAdapter
 from voice_translator.audio.devices import AudioDeviceManager, DeviceInfo
+from voice_translator.config.languages import (
+    defaults as language_defaults,
+    language_choices,
+    opus_pair_paths,
+    validate_language,
+    validate_pair,
+    xtts_supported,
+)
 from voice_translator.config.models import AppConfig
 from voice_translator.config.presets import APP_PRESETS, ASR_PRESETS, asr_choices, resolve_input_mode
 from voice_translator.desktop.hotkeys import GlobalHotkeys, validate_bindings
@@ -68,6 +76,9 @@ class MeetingOrchestrator:
         self.hotkeys: Optional[GlobalHotkeys] = None
         self._hotkey_task: Optional[asyncio.Task] = None
         self.input_mode = resolve_input_mode(config.controls.app_preset, config.controls.input_mode)
+        default_source, default_target = language_defaults(config)
+        self.source_language = default_source
+        self.target_language = default_target
         self.ptt_pressed = False
         self.paused = False
         self.muted = False
@@ -151,11 +162,10 @@ class MeetingOrchestrator:
                 device=self.config.asr.device,
                 compute_type=self.config.asr.compute_type,
             )
+            nllb_path = getattr(self.config.translation, "nllb_model_path", None)
             self.mt_adapter.initialize(
-                tr_en_model_path=self.config.translation.tr_en_model_path,
-                en_tr_model_path=self.config.translation.en_tr_model_path,
-                tr_fr_model_path=getattr(self.config.translation, "tr_fr_model_path", None),
-                nllb_model_path=getattr(self.config.translation, "nllb_model_path", None) if getattr(self.config.translation, "model_type", "auto") == "nllb" else None,
+                pair_paths=opus_pair_paths(self.config),
+                nllb_model_path=nllb_path if getattr(self.config.translation, "model_type", "auto") in ("auto", "nllb") else None,
                 device=self.config.translation.device,
                 compute_type=self.config.translation.compute_type,
             )
@@ -203,7 +213,8 @@ class MeetingOrchestrator:
         loopback_id: Optional[str] = None,
         render_id: Optional[str] = None,
         voice_profile_id: Optional[str] = None,
-        target_language: Optional[str] = "en",
+        source_language: Optional[str] = None,
+        target_language: Optional[str] = None,
         save_meeting: bool = False,
         context_prompt: Optional[str] = None,
         app_preset: Optional[str] = None,
@@ -214,6 +225,18 @@ class MeetingOrchestrator:
     ):
         if context_prompt and context_prompt.strip():
             self.config.asr.initial_prompt = context_prompt.strip()
+
+        source = validate_language(self.config, source_language or self.source_language)
+        target = validate_language(self.config, target_language or self.target_language)
+        if not self.use_mocks:
+            if not xtts_supported(self.config, target):
+                raise RuntimeError(
+                    f"XTTS-v2 cannot synthesize '{target}'. Pick a target language from the supported matrix."
+                )
+            validate_pair(self.config, source, target, require_models=True)
+            validate_pair(self.config, target, source, require_models=True)
+        self.source_language = source
+        self.target_language = target
 
         if self.status != MeetingStatus.READY:
             if self.status == MeetingStatus.ERROR:
@@ -298,8 +321,8 @@ class MeetingOrchestrator:
                 on_event_callback=self._broadcast_event,
                 on_latency_callback=self._on_latency_event,
             )
-            if target_language:
-                self.outgoing_pipeline.set_target_language(target_language)
+            self.outgoing_pipeline.set_source_language(source)
+            self.outgoing_pipeline.set_target_language(target)
             try:
                 await self.outgoing_pipeline.start()
             except Exception as exc:
@@ -321,6 +344,7 @@ class MeetingOrchestrator:
                 on_event_callback=self._broadcast_event,
                 on_latency_callback=self._on_latency_event,
             )
+            self.incoming_pipeline.set_languages(target, source)
             try:
                 await self.incoming_pipeline.start()
             except Exception as exc:
@@ -406,7 +430,9 @@ class MeetingOrchestrator:
     def session_options(self) -> dict:
         return {"controls": self.controls_snapshot(), "asr_models": asr_choices(self.config.asr.model_path),
                 "presets": [{"id": key, "label": data[0], "input_mode": data[1], "guidance": data[2]}
-                            for key, data in APP_PRESETS.items()]}
+                            for key, data in APP_PRESETS.items()],
+                "languages": language_choices(self.config),
+                "language_defaults": {"source": self.source_language, "target": self.target_language}}
 
     async def update_controls(self, *, input_mode=None, ptt_pressed=None, paused=None,
                               muted=None, overlay_enabled=None, at_ns=None):
@@ -528,18 +554,37 @@ class MeetingOrchestrator:
         })
         return True
 
-    def switch_target_language(self, target_language: str) -> bool:
-        lang = target_language.lower().strip()
-        if lang not in ("en", "fr"):
-            raise RuntimeError(f"Target language '{target_language}' is not supported. Choose 'en' or 'fr'.")
+    def switch_languages(self, source_language: str, target_language: str) -> bool:
+        """Live switch of speaking and meeting languages during an active session."""
+        source = validate_language(self.config, source_language)
+        target = validate_language(self.config, target_language)
+        if not self.use_mocks:
+            if not xtts_supported(self.config, target):
+                raise RuntimeError(
+                    f"XTTS-v2 cannot synthesize '{target}'. Pick a target language from the supported matrix."
+                )
+            validate_pair(self.config, source, target, require_models=True)
+            validate_pair(self.config, target, source, require_models=True)
+        self.source_language = source
+        self.target_language = target
+        self.config.languages.default_source = source
+        self.config.languages.default_target = target
         if self.outgoing_pipeline:
-            self.outgoing_pipeline.set_target_language(lang)
-        logger.info("Switched outgoing target language to '%s'", lang)
+            self.outgoing_pipeline.set_source_language(source)
+            self.outgoing_pipeline.set_target_language(target)
+        if self.incoming_pipeline:
+            self.incoming_pipeline.set_languages(target, source)
+        logger.info("Switched languages to source '%s', target '%s'", source, target)
         self._broadcast_event({
-            "type": "target_language_switched",
-            "target_language": lang,
+            "type": "languages_switched",
+            "source_language": source,
+            "target_language": target,
         })
         return True
+
+    def switch_target_language(self, target_language: str) -> bool:
+        """Legacy single-knob switch: keeps the current source language."""
+        return self.switch_languages(self.source_language, target_language)
 
     def _broadcast_status(self):
         self._broadcast_event({

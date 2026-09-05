@@ -10,7 +10,7 @@
   <header>
     <div>
       <h1>Realtime Voice Translator</h1>
-      <span style="font-size: 0.8rem; color: var(--text-secondary);">Full-Duplex Turkish ↔ English Localhost AI</span>
+      <span style="font-size: 0.8rem; color: var(--text-secondary);">Full-Duplex Realtime Voice Translation</span>
     </div>
     <div style="display: flex; align-items: center; gap: 1rem;">
       <span id="meetingIdLabel" style="font-size: 0.85rem; color: var(--text-secondary);">No active meeting</span>
@@ -75,11 +75,13 @@
           <select id="profileSelect"></select>
         </div>
         <div class="form-group">
-          <label for="targetLanguageSelect">Outgoing Target Language:</label>
-          <select id="targetLanguageSelect">
-            <option value="en" selected>English (en)</option>
-            <option value="fr">Français (fr)</option>
-          </select>
+          <label for="sourceLanguageSelect">Konuştuğum Dil (My Language):</label>
+          <select id="sourceLanguageSelect"></select>
+        </div>
+        <div class="form-group">
+          <label for="targetLanguageSelect">Toplantı Dili / Hedef Dil (Meeting Language):</label>
+          <select id="targetLanguageSelect"></select>
+          <p id="languageHelp" class="setup-guidance"></p>
         </div>
         <div class="form-group">
           <label for="promptInput">Meeting Topic / Context Keywords (Optional):</label>
@@ -132,20 +134,20 @@
 
     <!-- Main Content / Dual Pipelines -->
     <div class="main-content">
-      <!-- Outgoing Pipeline (TR -> EN Cloned Speech) -->
+      <!-- Outgoing Pipeline (Mic -> Cloned Speech) -->
       <div class="stream-panel">
         <div class="card">
-          <h2>Outgoing: Turkish Mic ➔ English Cloned Speech (VB-CABLE)</h2>
+          <h2 id="outgoingTitle">Outgoing: Mic ➔ Cloned Speech (VB-CABLE)</h2>
           <div id="outgoingBox" class="transcript-box">
             <div class="utterance-partial" id="outgoingPartial">Waiting for speech...</div>
           </div>
         </div>
       </div>
 
-      <!-- Incoming Pipeline (EN application loopback -> TR subtitles) -->
+      <!-- Incoming Pipeline (Loopback -> Subtitles) -->
       <div class="stream-panel">
         <div class="card">
-          <h2>Incoming: English Audio ➔ Live Turkish Subtitles</h2>
+          <h2 id="incomingTitle">Incoming: Loopback ➔ Live Subtitles</h2>
           <div id="incomingBox" class="transcript-box">
             <div class="utterance-partial" id="incomingPartial">Waiting for incoming audio...</div>
           </div>

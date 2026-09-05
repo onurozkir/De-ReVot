@@ -7,7 +7,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const loopbackSelect = document.getElementById("loopbackSelect");
   const renderSelect = document.getElementById("renderSelect");
   const profileSelect = document.getElementById("profileSelect");
+  const sourceLanguageSelect = document.getElementById("sourceLanguageSelect");
   const targetLanguageSelect = document.getElementById("targetLanguageSelect");
+  const languageHelp = document.getElementById("languageHelp");
+  const outgoingTitle = document.getElementById("outgoingTitle");
+  const incomingTitle = document.getElementById("incomingTitle");
   const promptInput = document.getElementById("promptInput");
   const btnStart = document.getElementById("btnStart");
   const btnStop = document.getElementById("btnStop");
@@ -46,6 +50,10 @@ document.addEventListener("DOMContentLoaded", () => {
   let controlRequests = Promise.resolve();
   let uiPttPressed = false;
   let presets = [];
+  let languages = [];
+  let langNames = {};
+  let currentSource = "tr";
+  let currentTarget = "en";
 
   function applyControls(controls) {
     if (!controls) return;
@@ -82,6 +90,66 @@ document.addEventListener("DOMContentLoaded", () => {
     const preset = presets.find(p => p.id === appPresetSelect.value);
     document.getElementById("setupGuidance").textContent = (preset?.guidance || "") +
       " Incoming loopback includes every app, notification and game sound on the selected speaker.";
+  }
+
+  function refreshLanguageSelects() {
+    if (!sourceLanguageSelect) return;
+    const sourceOptions = languages.map(l => new Option(`${l.name} (${l.id})`, l.id));
+    sourceLanguageSelect.replaceChildren(...sourceOptions);
+    if (languages.some(l => l.id === currentSource)) sourceLanguageSelect.value = currentSource;
+
+    const sourceEntry = languages.find(l => l.id === currentSource);
+    const targetOptions = languages.map(l => {
+      const option = new Option(`${l.name} (${l.id})`, l.id);
+      const route = sourceEntry?.pairs?.[l.id];
+      if (!l.xtts_supported || !route) {
+        option.disabled = true;
+        option.textContent += l.xtts_supported ? " — model download required" : " — TTS unsupported";
+      }
+      return option;
+    });
+    targetLanguageSelect.replaceChildren(...targetOptions);
+    if (languages.some(l => l.id === currentTarget)) {
+      if (!targetLanguageSelect.options.namedItem(currentTarget)?.disabled) {
+        targetLanguageSelect.value = currentTarget;
+      } else if (currentSource !== currentTarget) {
+        const firstEnabled = [...targetLanguageSelect.options].find(o => !o.disabled && o.value !== currentSource);
+        if (firstEnabled) currentTarget = firstEnabled.value;
+      }
+    }
+    languageHelp.textContent =
+      `Konuştuğum dil ASR'yi, toplantı dili çeviriyi ve klonlanmış sesi, gelen alt yazılar da konuştuğum dile çevrilir. ` +
+      (sourceEntry ? `Pair ${currentSource} ➔ ${currentTarget}: ` +
+        (sourceEntry.pairs[currentTarget] === "opus" ? "dedicated OPUS model" :
+         sourceEntry.pairs[currentTarget] === "nllb" ? "NLLB-200" : "model required") : "");
+  }
+
+  async function switchLanguagesLive() {
+    if (currentMeetingStatus.toLowerCase() !== "running") return true;
+    try {
+      const res = await fetch("/api/meeting/switch_languages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_language: currentSource, target_language: currentTarget }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert("Failed to switch language:\n" + (err.detail || res.statusText));
+        return false;
+      }
+      console.log("Languages switched:", currentSource, currentTarget);
+      return true;
+    } catch (err) {
+      console.error("Network error switching languages:", err);
+      return false;
+    }
+  }
+
+  function updateLanguageTitles() {
+    const srcName = langNames[currentSource] || currentSource.toUpperCase();
+    const tgtName = langNames[currentTarget] || currentTarget.toUpperCase();
+    if (outgoingTitle) outgoingTitle.textContent = `Outgoing: ${srcName} Mic ➔ ${tgtName} Cloned Speech (VB-CABLE)`;
+    if (incomingTitle) incomingTitle.textContent = `Incoming: ${tgtName} Audio ➔ Live ${srcName} Subtitles`;
   }
 
   async function loadSessionOptions() {
@@ -171,10 +239,19 @@ document.addEventListener("DOMContentLoaded", () => {
         profileSelect.appendChild(opt);
       });
 
-      const savedTargetLang = localStorage.getItem("teams_trans_target_lang") || "en";
-      if (targetLanguageSelect) {
-        targetLanguageSelect.value = savedTargetLang;
-      }
+      // 2b. Fetch language registry
+      const langRes = await fetch("/api/languages");
+      const langData = await langRes.json();
+      languages = langData.languages || [];
+      langNames = {};
+      languages.forEach(l => { langNames[l.id] = l.name; });
+      const savedSource = localStorage.getItem("voice_trans_source_lang") || langData.defaults.source || "tr";
+      const savedTarget = localStorage.getItem("voice_trans_target_lang")
+        || localStorage.getItem("teams_trans_target_lang")
+        || langData.defaults.target || "en";
+      currentSource = savedSource;
+      currentTarget = savedTarget;
+      refreshLanguageSelects();
 
       // Save choices automatically & switch dynamically during meetings
       micSelect.onchange = () => { localStorage.setItem("teams_trans_mic", micSelect.value); updateSelectedDeviceDetails(); };
@@ -205,27 +282,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (targetLanguageSelect) {
         targetLanguageSelect.onchange = async () => {
-          localStorage.setItem("teams_trans_target_lang", targetLanguageSelect.value);
-          if (currentMeetingStatus.toLowerCase() === "running") {
-            try {
-              console.log("Live switching target language to:", targetLanguageSelect.value);
-              const res = await fetch("/api/meeting/switch_language", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ target_language: targetLanguageSelect.value }),
-              });
-              if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                alert("Failed to switch language:\n" + (err.detail || res.statusText));
-              } else {
-                console.log("Target language switched successfully.");
-              }
-            } catch (err) {
-              console.error("Network error switching language:", err);
-            }
-          }
+          const previous = currentTarget;
+          currentTarget = targetLanguageSelect.value;
+          localStorage.setItem("voice_trans_target_lang", currentTarget);
+          if (!(await switchLanguagesLive())) currentTarget = previous;
+          refreshLanguageSelects();
+          updateLanguageTitles();
         };
       }
+      if (sourceLanguageSelect) {
+        sourceLanguageSelect.onchange = async () => {
+          const previous = currentSource;
+          currentSource = sourceLanguageSelect.value;
+          localStorage.setItem("voice_trans_source_lang", currentSource);
+          refreshLanguageSelects();
+          if (!(await switchLanguagesLive())) currentSource = previous;
+          refreshLanguageSelects();
+          updateLanguageTitles();
+        };
+      }
+      updateLanguageTitles();
       updateSelectedDeviceDetails();
 
       // 3. Fetch status
@@ -317,9 +393,16 @@ document.addEventListener("DOMContentLoaded", () => {
         applyControls(data.controls);
         break;
 
+      case "languages_switched":
+        currentSource = data.source_language;
+        currentTarget = data.target_language;
+        refreshLanguageSelects();
+        updateLanguageTitles();
+        break;
+
       case "asr_partial":
         if (data.direction === "outgoing") {
-          outgoingPartial.textContent = `🎙️ [TR Partial] ${data.text}`;
+          outgoingPartial.textContent = `🎙️ [${(data.source_language || currentSource).toUpperCase()} Partial] ${data.text}`;
         }
         break;
 
@@ -331,7 +414,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       case "tts_started":
         outgoingPartial.textContent = "Listening...";
-        addUtterance(outgoingBox, data.source_text, `🔊 [EN Routed] ${data.translated_text}`, false);
+        addUtterance(outgoingBox, data.source_text,
+          `🔊 [${(data.target_language || currentTarget).toUpperCase()} Routed] ${data.translated_text}`, false);
         break;
 
       case "tts_rejected":
@@ -339,12 +423,14 @@ document.addEventListener("DOMContentLoaded", () => {
         break;
 
       case "incoming_partial":
-        incomingPartial.textContent = `⚡ [EN] ${data.source_text} ➔ [TR] ${data.translated_text}`;
+        incomingPartial.textContent =
+          `⚡ [${(data.source_language || currentTarget).toUpperCase()}] ${data.source_text} ➔ [${(data.target_language || currentSource).toUpperCase()}] ${data.translated_text}`;
         break;
 
       case "incoming_committed":
         incomingPartial.textContent = "Waiting for incoming audio...";
-        addUtterance(incomingBox, data.source_text, `🇹🇷 [TR Subtitle] ${data.translated_text}`, true);
+        addUtterance(incomingBox, data.source_text,
+          `🇹🇷 [${(data.target_language || currentSource).toUpperCase()} Subtitle] ${data.translated_text}`, true);
         break;
 
       case "latency_update":
@@ -435,6 +521,7 @@ document.addEventListener("DOMContentLoaded", () => {
           loopback_id: loopbackSelect.value,
           render_id: renderSelect.value,
           voice_profile_id: profileSelect.value,
+          source_language: sourceLanguageSelect ? sourceLanguageSelect.value : "tr",
           target_language: targetLanguageSelect ? targetLanguageSelect.value : "en",
           save_meeting: false,
           app_preset: appPresetSelect.value,

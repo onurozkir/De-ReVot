@@ -9,7 +9,7 @@ def test_ui_running_state_checks_use_only_the_normalized_status():
 
     assert 'currentMeetingStatus === "RUNNING"' not in script
     assert 'if (status === "RUNNING")' not in script
-    assert script.count('if (currentMeetingStatus.toLowerCase() === "running")') == 2
+    assert script.count('if (currentMeetingStatus.toLowerCase() === "running")') == 1
     assert script.count('if (norm === "running")') == 1
 
 

@@ -43,16 +43,31 @@ def test_web_api_endpoints():
     assert len(profiles) >= 1
     assert "target_languages" in profiles[0]
 
+    # Test language registry endpoint
+    res = client.get("/api/languages")
+    assert res.status_code == 200
+    lang_data = res.json()
+    assert {"tr", "en", "fr"} <= {l["id"] for l in lang_data["languages"]}
+    assert lang_data["defaults"] == {"source": "tr", "target": "en"}
+    assert lang_data["languages"][0]["xtts_supported"] is True
+
     # Test switch voice and language endpoints
     res = client.post("/api/meeting/switch_voice", json={"profile_id": profiles[0]["id"]})
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+
+    res = client.post("/api/meeting/switch_languages", json={"source_language": "en", "target_language": "fr"})
+    assert res.status_code == 200
+    assert res.json()["target_language"] == "fr"
 
     res = client.post("/api/meeting/switch_language", json={"target_language": "fr"})
     assert res.status_code == 200
     assert res.json()["target_language"] == "fr"
 
     res = client.post("/api/meeting/switch_language", json={"target_language": "unsupported"})
+    assert res.status_code == 400
+
+    res = client.post("/api/meeting/switch_languages", json={"source_language": "tr", "target_language": "de"})
     assert res.status_code == 400
 
 

@@ -102,12 +102,57 @@ def download_model(key: str, info: dict, revision: str | None = None):
     print(f"Successfully downloaded to: {dest_path.resolve()}")
 
 
+def load_language_registry() -> dict:
+    """Read the [languages] registry from config/default.toml."""
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    with open(root / "config" / "default.toml", "rb") as f:
+        data = tomllib.load(f)
+    return data.get("languages", {})
+
+
+def download_language(code: str):
+    """Download pinned MT pairs involving one registry language; NLLB covers the rest."""
+    registry = load_language_registry()
+    definitions = registry.get("definitions", {})
+    enabled = registry.get("enabled", list(definitions))
+    if code not in definitions:
+        raise SystemExit(
+            f"Language '{code}' is not defined. Add [languages.definitions.{code}] to "
+            f"config/default.toml first. Defined: {', '.join(sorted(definitions))}"
+        )
+    print(f"Resolving MT pairs for language '{code}' (enabled: {', '.join(enabled)})")
+    downloaded_any = False
+    for other in enabled:
+        if other == code:
+            continue
+        for src, tgt in ((code, other), (other, code)):
+            model_key = f"mt-{src}-{tgt}"
+            if model_key in MODELS:
+                download_model(model_key, MODELS[model_key])
+                downloaded_any = True
+            else:
+                print(
+                    f"\nNo pinned OPUS pair for {src}->{tgt}. "
+                    "NLLB-200 covers this pair: python scripts/download_models.py mt-nllb-200"
+                )
+    if not downloaded_any:
+        print("\nNo dedicated OPUS pairs are pinned for this language; NLLB-200 covers its pairs.")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Download pinned models for Teams Translator")
+    parser = argparse.ArgumentParser(description="Download pinned models for the voice translator")
     parser.add_argument(
         "model",
+        nargs="?",
         choices=list(MODELS.keys()) + ["all"],
         help="Model to download (or 'all')",
+    )
+    parser.add_argument(
+        "--lang",
+        metavar="CODE",
+        help="Download all pinned MT pairs involving one registry language",
     )
     parser.add_argument(
         "--convert-ct2",
@@ -116,11 +161,15 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.model == "all":
+    if args.lang:
+        download_language(args.lang)
+    elif args.model == "all":
         for k, v in MODELS.items():
             download_model(k, v)
-    else:
+    elif args.model:
         download_model(args.model, MODELS[args.model])
+    else:
+        parser.error("either MODEL or --lang CODE is required")
 
     if args.convert_ct2:
         print("\n--- Converting MT models to CTranslate2 INT8 ---")

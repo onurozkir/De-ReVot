@@ -15,6 +15,7 @@ from voice_translator.asr.base import ASRAdapter, ASRSession
 from voice_translator.audio.capture import AudioCaptureEngine
 from voice_translator.audio.devices import DeviceInfo
 from voice_translator.audio.resampler import AudioResampler
+from voice_translator.config.languages import asr_prompt, defaults as language_defaults
 from voice_translator.config.models import AppConfig
 from voice_translator.core.bounded_queue import BoundedQueue
 from voice_translator.core.types import Direction, LatencyEvent, UtteranceEvent, UtteranceState
@@ -51,6 +52,9 @@ class IncomingPipeline:
         self.asr_adapter = asr_adapter
         self.mt_adapter = mt_adapter
         self.config = config
+        default_source, default_target = language_defaults(config)
+        self.meeting_language: str = default_target  # ASR language of remote speakers
+        self.display_language: str = default_source  # Subtitle language for the user
         self.on_event_callback = on_event_callback
         self.on_latency_callback = on_latency_callback
         self.vad = build_vad(config.streaming)
@@ -104,8 +108,11 @@ class IncomingPipeline:
         self.asr_session = self.asr_adapter.create_session(
             stream_id=f"rx_{self.meeting_id}",
             direction=Direction.INCOMING,
-            language="en",
-            initial_prompt="Hello. English business, technical and meeting conversation.",
+            language=self.meeting_language,
+            initial_prompt=asr_prompt(
+                self.config, self.meeting_language,
+                "Hello. English business, technical and meeting conversation.",
+            ),
         )
         self.asr_session.metadata["meeting_id"] = self.meeting_id
         try:
@@ -186,7 +193,7 @@ class IncomingPipeline:
                         event.text,
                         now_ms=time.monotonic() * 1000.0,
                         silence_ms=getattr(vad_result, "silence_ms", 0.0),
-                        language=getattr(self.config.asr, "language_loopback", "en"),
+                        language=self.meeting_language,
                     )
                     if decision.should_commit and self._handle_commit(
                         decision.committed_text,
@@ -270,7 +277,7 @@ class IncomingPipeline:
             direction=Direction.INCOMING,
             utterance_id=f"{self.asr_session.stream_id}_{self._sequence_counter}",
             sequence_id=self._sequence_counter, revision=1, state=UtteranceState.COMMITTED,
-            source_language="en", text=text.strip(), audio_start_ns=audio_start_ns,
+            source_language=self.meeting_language, text=text.strip(), audio_start_ns=audio_start_ns,
             audio_end_ns=audio_end_ns, is_final=True, model_info=accepted_info,
         )
         self._sequence_counter += 1
@@ -317,7 +324,8 @@ class IncomingPipeline:
             event = await self.partial_queue.get()
             if self._subtitle_cancelled(event) or event.sequence_id < self._sequence_counter:
                 continue
-            translated = await asyncio.to_thread(self.mt_adapter.translate, event.text, "en", "tr", True)
+            translated = await asyncio.to_thread(
+                self.mt_adapter.translate, event.text, self.meeting_language, self.display_language, True)
             if self._subtitle_cancelled(event) or event.sequence_id < self._sequence_counter:
                 continue
             now_ns = time.monotonic_ns()
@@ -326,6 +334,7 @@ class IncomingPipeline:
                 "type": "incoming_partial", "direction": "incoming",
                 "source_text": event.text, "translated_text": translated,
                 "sequence_id": event.sequence_id, "revision": event.revision, "timestamp_ns": now_ns,
+                "source_language": self.meeting_language, "target_language": self.display_language,
             })
 
     async def _committed_mt_worker(self) -> None:
@@ -342,7 +351,7 @@ class IncomingPipeline:
             translated = await asyncio.to_thread(
                 self.mt_adapter.translate_event,
                 event,
-                "tr",
+                self.display_language,
                 context=prev_context,
                 glossary=glossary,
             )
@@ -355,6 +364,7 @@ class IncomingPipeline:
                 "type": "incoming_committed", "direction": "incoming",
                 "source_text": translated.source_text, "translated_text": translated.translated_text,
                 "sequence_id": translated.sequence_id, "timestamp_ns": now_ns,
+                "source_language": self.meeting_language, "target_language": self.display_language,
             })
 
     def _record_latency(self, event: UtteranceEvent, event_type: str, now_ns: int, duration_ms: float) -> None:
@@ -384,6 +394,26 @@ class IncomingPipeline:
             self._delivery_generation += 1
             self._reset_requested = True
         self.paused = paused
+
+    def set_languages(self, meeting_language: str, display_language: str) -> None:
+        """Apply incoming ASR and subtitle languages; resets the current utterance boundary."""
+        meeting = meeting_language.lower().strip()
+        display = display_language.lower().strip()
+        if meeting == self.meeting_language and display == self.display_language:
+            return
+        self.meeting_language = meeting
+        self.display_language = display
+        if self.asr_session is not None:
+            self.asr_session.language = meeting
+            self.asr_session.initial_prompt = asr_prompt(
+                self.config, meeting, "Hello. English business, technical and meeting conversation.")
+            reset_asr_utterance(self.asr_session)
+            self.commit_controller.reset()
+            self.vad.reset()
+            self._preroll.clear()
+            self._in_speech = False
+            self._current_max_queue_age_ms = 0.0
+        logger.info("Incoming languages updated: ASR '%s', subtitles '%s'", self.meeting_language, self.display_language)
 
     def _subtitle_cancelled(self, event) -> bool:
         cancelled = self.paused or event.model_info.get("delivery_generation", 0) != self._delivery_generation

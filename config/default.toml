@@ -90,6 +90,13 @@ beam_size = 2
 # to protect the live partial latency budget.
 enable_context_priming = true
 
+# Declarative bilingual pair routing. A pair routes to its OPUS model when the
+# directory exists; any other pair falls back to NLLB-200 when installed.
+[translation.pairs]
+"tr-en" = "models/mt/opus-mt-tc-big-tr-en"
+"en-tr" = "models/mt/opus-mt-tc-big-en-tr"
+"tr-fr" = "models/mt/opus-mt-tr-fr"
+
 [translation.glossary]
 "pull request" = "pull request"
 "standup" = "standup"
@@ -126,3 +133,34 @@ flush_interval_sec = 2.0
 window_size = 100
 sample_interval_sec = 1.0
 high_latency_threshold_ms = 2500.0
+
+# Declarative language registry. Enabled languages populate the Web UI selectors.
+# Add a new language: define it here, add its code to `enabled`, then run
+# `uv run python scripts/download_models.py --lang <code>` for its MT pairs.
+# XTTS-v2 synthesis languages: en, tr, fr, de, es, it, pt, pl, ru, nl, cs, ar,
+# zh-cn, ja, hu, ko, hi. NLLB-200 covers any pair between enabled languages.
+[languages]
+enabled = ["tr", "en", "fr"]
+default_source = "tr"
+default_target = "en"
+
+[languages.definitions.tr]
+name = "Türkçe"
+whisper_code = "tr"
+nllb_code = "tur_Latn"
+xtts_supported = true
+asr_prompt = "Toplantı, Türkçe, teknik, iş, günlük konuşma."
+
+[languages.definitions.en]
+name = "English"
+whisper_code = "en"
+nllb_code = "eng_Latn"
+xtts_supported = true
+asr_prompt = "Hello. English business, technical and meeting conversation."
+
+[languages.definitions.fr]
+name = "Français"
+whisper_code = "fr"
+nllb_code = "fra_Latn"
+xtts_supported = true
+asr_prompt = "Réunion, français, technique, conversation professionnelle."

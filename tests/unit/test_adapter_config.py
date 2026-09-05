@@ -31,8 +31,8 @@ def test_ctranslate_uses_configured_beam_for_commits_and_greedy_partials():
 
     adapter = CTranslate2MTAdapter(beam_size=4)
     adapter.backend_type = "ctranslate2"
-    adapter.tr_en_translator = FakeTranslator()
-    adapter.tr_en_tokenizer = FakeTokenizer()
+    adapter.opus_pairs[("tr", "en")] = (FakeTranslator(), FakeTokenizer())
+    adapter.opus_backends[("tr", "en")] = "ctranslate2"
 
     assert adapter.translate("Merhaba", "tr", "en", is_partial=True) == "translated"
     assert adapter.translate("Merhaba", "tr", "en", is_partial=False) == "translated"

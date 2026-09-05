@@ -15,14 +15,14 @@ class MTAdapter(abc.ABC):
     @abc.abstractmethod
     def initialize(
         self,
-        tr_en_model_path: str,
-        en_tr_model_path: str,
-        tr_fr_model_path: Optional[str] = None,
+        *,
+        pair_paths: Optional[dict[str, str]] = None,
         nllb_model_path: Optional[str] = None,
+        languages: Optional[dict[str, object]] = None,
         device: str = "cpu",
         compute_type: str = "int8",
     ):
-        """Initialize models offline; validate local paths."""
+        """Initialize installed offline models from the language registry."""
         pass
 
     @abc.abstractmethod

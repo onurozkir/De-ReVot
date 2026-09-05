@@ -100,6 +100,12 @@ Apply this workflow whenever the skill matches:
 41. Use `voice_translator` imports and `VOICE_TRANSLATOR_*` configuration names.
     Legacy `TEAMS_TRANSLATOR_*` environment values remain compatible with lower
     precedence. Keep root Plan.md and this skill tracked through naming migrations.
+42. Language support is registry-driven via `[languages]` in config and
+    `voice_translator.config.languages`. Never hardcode language codes in
+    pipelines, routes, or the Web UI. Pair routing prefers a pinned OPUS model
+    and falls back to NLLB-200; validate pairs and the XTTS matrix before
+    starting or switching. New languages require a registry definition,
+    an `enabled` entry, and explicit model downloads (`download_models.py --lang`).
 
 Before editing, inspect the current implementation and dirty worktree. During
 review, reject growing backlog, committed reordering/loss, false Ready states,

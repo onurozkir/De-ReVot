@@ -16,6 +16,7 @@ from voice_translator.audio.capture import AudioCaptureEngine
 from voice_translator.audio.devices import DeviceInfo
 from voice_translator.audio.render import AudioRenderEngine
 from voice_translator.audio.resampler import AudioResampler
+from voice_translator.config.languages import asr_prompt, defaults as language_defaults
 from voice_translator.config.models import AppConfig
 from voice_translator.config.presets import resolve_input_mode
 from voice_translator.streaming.input_control import InputGate
@@ -62,7 +63,9 @@ class OutgoingPipeline:
         self.tts_adapter = tts_adapter
         self.voice_profile = voice_profile
         self.config = config
-        self.target_language: str = "en"
+        default_source, default_target = language_defaults(config)
+        self.source_language: str = default_source
+        self.target_language: str = default_target
         self.on_event_callback = on_event_callback
         self.on_latency_callback = on_latency_callback
 
@@ -127,8 +130,8 @@ class OutgoingPipeline:
         self.asr_session = self.asr_adapter.create_session(
             stream_id=f"tx_{self.meeting_id}",
             direction=Direction.OUTGOING,
-            language="tr",
-            initial_prompt=getattr(self.config.asr, "initial_prompt", ""),
+            language=self.source_language,
+            initial_prompt=asr_prompt(self.config, self.source_language, getattr(self.config.asr, "initial_prompt", "")),
         )
         self.asr_session.metadata["meeting_id"] = self.meeting_id
         try:
@@ -232,7 +235,7 @@ class OutgoingPipeline:
                         event.text,
                         now_ms=time.monotonic() * 1000.0,
                         silence_ms=getattr(vad_result, "silence_ms", 0.0),
-                        language=getattr(self.config.asr, "language_mic", "tr"),
+                        language=self.source_language,
                     )
                     if commit.should_commit and self._handle_commit(
                         commit.committed_text,
@@ -256,6 +259,7 @@ class OutgoingPipeline:
                         "type": "asr_partial", "direction": "outgoing", "text": event.text,
                         "sequence_id": event.sequence_id, "revision": event.revision,
                         "timestamp_ns": captured_at_ns,
+                        "source_language": self.source_language, "target_language": self.target_language,
                     })
                 elif decision.reason in {
                     "implausible_speech_rate", "repetitive_text", "whisper_no_speech",
@@ -319,7 +323,7 @@ class OutgoingPipeline:
             direction=Direction.OUTGOING,
             utterance_id=f"{self.asr_session.stream_id}_{self._sequence_counter}",
             sequence_id=self._sequence_counter, revision=1, state=UtteranceState.COMMITTED,
-            source_language="tr", text=text.strip(), audio_start_ns=audio_start_ns,
+            source_language=self.source_language, text=text.strip(), audio_start_ns=audio_start_ns,
             audio_end_ns=audio_end_ns, is_final=True, model_info=accepted_info,
         )
         self._sequence_counter += 1
@@ -393,6 +397,7 @@ class OutgoingPipeline:
                 "type": "mt_committed", "direction": "outgoing",
                 "source_text": translated.source_text, "translated_text": translated.translated_text,
                 "sequence_id": translated.sequence_id, "timestamp_ns": t1,
+                "source_language": self.source_language, "target_language": self.target_language,
             })
             if not await self.tts_queue.put(translated):
                 self._overloaded = True
@@ -433,6 +438,7 @@ class OutgoingPipeline:
                             "translated_text": event.translated_text,
                             "sequence_id": event.sequence_id,
                             "timestamp_ns": now_ns,
+                            "source_language": self.source_language, "target_language": self.target_language,
                         })
                         # Event means first PCM reached bounded render path, once.
                         pcm_routed = True
@@ -508,6 +514,24 @@ class OutgoingPipeline:
     def set_voice_profile(self, profile: VoiceProfile) -> None:
         self.voice_profile = profile
         logger.info("Outgoing pipeline voice profile updated to '%s' (%s)", profile.display_name, profile.id)
+
+    def set_source_language(self, source_language: str) -> None:
+        """Apply the speaking language to ASR; resets the current utterance boundary."""
+        code = source_language.lower().strip()
+        if code == self.source_language:
+            return
+        self.source_language = code
+        if self.asr_session is not None:
+            self.asr_session.language = code
+            self.asr_session.initial_prompt = asr_prompt(
+                self.config, code, getattr(self.config.asr, "initial_prompt", ""))
+            reset_asr_utterance(self.asr_session)
+            self.commit_controller.reset()
+            self.vad.reset()
+            self._preroll.clear()
+            self._in_speech = False
+            self._current_max_queue_age_ms = 0.0
+        logger.info("Outgoing pipeline source language updated to '%s'", self.source_language)
 
     def set_target_language(self, target_language: str) -> None:
         self.target_language = target_language.lower().strip()

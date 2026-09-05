@@ -37,3 +37,28 @@ def test_new_environment_prefix_takes_precedence_over_legacy(monkeypatch, tmp_pa
     monkeypatch.setenv("TEAMS_TRANSLATOR_SERVER_PORT", "8111")
     monkeypatch.setenv("VOICE_TRANSLATOR_SERVER_PORT", "8222")
     assert load_config(project_root=str(tmp_path)).server.port == 8222
+
+
+def test_language_registry_configuration_is_loaded():
+    from voice_translator.config.loader import load_config
+    config = load_config()
+    assert config.languages.default_source == "tr"
+    assert config.languages.default_target == "en"
+    assert set(config.languages.enabled) == {"tr", "en", "fr"}
+    assert config.languages.definitions["fr"].nllb_code == "fra_Latn"
+    assert config.translation.pairs["tr-en"].endswith("opus-mt-tc-big-tr-en")
+
+
+def test_language_registry_accepts_partial_toml_override():
+    config = AppConfig.model_validate({
+        "languages": {
+            "enabled": ["en", "de"],
+            "default_source": "en",
+            "default_target": "de",
+            "definitions": {
+                "en": {"name": "English", "whisper_code": "en", "nllb_code": "eng_Latn"},
+                "de": {"name": "Deutsch", "whisper_code": "de", "nllb_code": "deu_Latn"},
+            },
+        }
+    })
+    assert config.languages.definitions["de"].xtts_supported is True

@@ -75,6 +75,21 @@ class ControlsConfig(BaseModel):
     global_hotkeys: bool = True
 
 
+class LanguageDefinition(BaseModel):
+    name: str
+    whisper_code: str
+    nllb_code: str
+    xtts_supported: bool = True
+    asr_prompt: str = ""
+
+
+class LanguagesConfig(BaseModel):
+    enabled: list[str] = Field(default_factory=lambda: ["tr", "en", "fr"])
+    default_source: str = "tr"
+    default_target: str = "en"
+    definitions: dict[str, LanguageDefinition] = Field(default_factory=dict)
+
+
 class OverlayConfig(BaseModel):
     enabled: bool = True
     font_size: int = Field(default=24, ge=12, le=60)
@@ -89,6 +104,7 @@ class TranslationConfig(BaseModel):
     tr_en_model_path: str = "models/mt/opus-mt-tc-big-tr-en"
     en_tr_model_path: str = "models/mt/opus-mt-tc-big-en-tr"
     tr_fr_model_path: str = "models/mt/opus-mt-tr-fr"
+    pairs: dict[str, str] = Field(default_factory=dict)
     nllb_model_path: Optional[str] = "models/mt/nllb-200-distilled-600M"
     device: str = "cpu"
     compute_type: str = "int8"
@@ -141,3 +157,4 @@ class AppConfig(BaseModel):
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    languages: LanguagesConfig = Field(default_factory=LanguagesConfig)
