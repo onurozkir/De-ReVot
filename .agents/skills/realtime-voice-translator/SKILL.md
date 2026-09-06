@@ -3,7 +3,7 @@ name: realtime-voice-translator
 description: Use for planning, implementing, debugging, benchmarking, or reviewing the local Windows Python realtime voice translator for meetings and games. Prioritize end-to-end latency, full-duplex streaming, WhisperLiveKit UI, desktop subtitles, push-to-talk, voice cloning, bounded queues, native Windows execution, and canonical root Plan.md. Do not use for unrelated repositories.
 ---
 
-# Realtime Voice Translator
+# De-ReVot — Realtime Voice Translator
 
 Apply this workflow whenever the skill matches:
 
@@ -106,6 +106,18 @@ Apply this workflow whenever the skill matches:
     and falls back to NLLB-200; validate pairs and the XTTS matrix before
     starting or switching. New languages require a registry definition,
     an `enabled` entry, and explicit model downloads (`download_models.py --lang`).
+43. Product branding is De-ReVot; retain `voice_translator` imports, existing
+    environment keys, preferences and GitHub URL. See Plan.md DEC-U017.
+44. Microphone noise suppression/AEC runs in the outgoing worker before PTT/VAD,
+    never in capture callbacks. Echo reference is a separate bounded timestamped
+    loopback tap that keeps collecting during incoming ASR stalls/pause. Preserve
+    double-talk; never implement blanket incoming-speech mic ducking. Expose DSP
+    failure/reference health. See Plan.md §8.4 for native backend and delay policy.
+45. Centralize reference discovery/validation/hashing in `tts/conditioning.py`.
+    An explicit file list is authoritative; missing files fail rather than vanish.
+    Hash and condition in the same deterministic order. Prepare before use and
+    reuse the in-memory snapshot without WAV I/O per utterance. Reference edits
+    take effect on the next prepare; see Plan.md §15 and the recording guide.
 
 Before editing, inspect the current implementation and dirty worktree. During
 review, reject growing backlog, committed reordering/loss, false Ready states,

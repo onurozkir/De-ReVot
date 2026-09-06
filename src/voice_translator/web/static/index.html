@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Realtime Voice Translator</title>
+  <title>De-ReVot</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <header>
     <div>
-      <h1>Realtime Voice Translator</h1>
+      <h1>De-ReVot</h1>
       <span style="font-size: 0.8rem; color: var(--text-secondary);">Full-Duplex Realtime Voice Translation</span>
     </div>
     <div style="display: flex; align-items: center; gap: 1rem;">
@@ -55,6 +55,9 @@
       </div>
       <div class="card">
         <h2>Audio & Devices</h2>
+        <label class="check-row"><input type="checkbox" id="noiseSuppression" checked> Background noise reduction</label>
+        <label class="check-row"><input type="checkbox" id="echoCancellation" checked> Speaker echo cancellation</label>
+        <p class="setup-guidance">Applies to the next session. For speakers, select their matching loopback. Headphones give the most reliable isolation.</p>
         <div class="form-group">
           <label for="micSelect">Physical Microphone:</label>
           <select id="micSelect"></select>
@@ -73,13 +76,14 @@
         <div class="form-group">
           <label for="profileSelect">Cloned Voice Profile (Live-Switchable):</label>
           <select id="profileSelect"></select>
+          <p id="profileError" class="setup-guidance" role="alert"></p>
         </div>
         <div class="form-group">
-          <label for="sourceLanguageSelect">Konuştuğum Dil (My Language):</label>
+          <label for="sourceLanguageSelect">My Language:</label>
           <select id="sourceLanguageSelect"></select>
         </div>
         <div class="form-group">
-          <label for="targetLanguageSelect">Toplantı Dili / Hedef Dil (Meeting Language):</label>
+          <label for="targetLanguageSelect">Target Language:</label>
           <select id="targetLanguageSelect"></select>
           <p id="languageHelp" class="setup-guidance"></p>
         </div>
@@ -93,6 +97,7 @@
 
       <div class="card">
         <h2>Live Audio Diagnostics</h2>
+        <p id="audioProcessingStatus" class="setup-guidance" role="status">Microphone processing idle.</p>
         <div class="diagnostic-row"><span>Mic</span><span id="micLevelText">-- dBFS</span></div>
         <div class="level-track"><div id="micLevelBar" class="level-bar"></div></div>
         <div class="diagnostic-row"><span>Speaker loopback</span><span id="loopLevelText">-- dBFS</span></div>

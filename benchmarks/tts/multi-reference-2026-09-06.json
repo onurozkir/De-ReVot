@@ -1,0 +1,28 @@
+{
+  "status": "MEASURED",
+  "references": 6,
+  "seconds_per_reference": 9,
+  "reference_origin": "Six slices of existing local recording; not six separately curated performances",
+  "conditioning_sec": 1.0441402999858838,
+  "disk_reload_sec": 0.050609199999598786,
+  "tensor_shapes": [
+    [
+      1,
+      32,
+      1024
+    ],
+    [
+      1,
+      512,
+      1
+    ]
+  ],
+  "pseudo_streaming_ttfa_p50_ms": 1010.0436999928206,
+  "pseudo_streaming_ttfa_p95_ms": 1180.9504600183573,
+  "rtf": 0.3180306709274386,
+  "cuda_peak_allocated_bytes": 1960935424,
+  "queue_age": "UNKNOWN: standalone TTS",
+  "full_duplex_soak": "UNKNOWN",
+  "speaker_similarity": "UNKNOWN: listener evaluation required",
+  "samples": 3
+}

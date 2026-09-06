@@ -42,6 +42,7 @@ def test_web_api_endpoints():
     profiles = res.json()["profiles"]
     assert len(profiles) >= 1
     assert "target_languages" in profiles[0]
+    assert profiles[0]["reference_count"] == len(profiles[0]["reference_audio_paths"])
 
     # Test language registry endpoint
     res = client.get("/api/languages")
@@ -86,6 +87,7 @@ def test_session_options_and_live_controls_keep_incoming_active_in_ptt():
     options = client.get("/api/session/options").json()
     assert {"teams", "zoom", "google_meet", "discord", "slack", "dota2", "pubg", "cs2"} <= {p["id"] for p in options["presets"]}
     assert {"turbo", "large_v3", "configured"} == {m["id"] for m in options["asr_models"]}
+    assert options["audio_processing"] == {"noise_suppression": True, "echo_cancellation": True}
     assert client.post("/api/session/controls", json={"input_mode": "ptt"}).status_code == 200
     assert client.post("/api/session/controls", json={"ptt_pressed": True}).json()["ptt_pressed"]
     assert client.post("/api/session/controls", json={"ptt_pressed": False}).status_code == 200
@@ -102,4 +104,17 @@ def test_controls_reject_requests_before_a_session():
     instance = MeetingOrchestrator(load_config(), use_mocks=True)
     client = TestClient(create_app(instance))
     assert client.post("/api/session/controls", json={"ptt_pressed": True}).status_code == 400
+    instance.device_manager.close()
+
+
+def test_start_api_forwards_explicit_audio_processing_choices(monkeypatch):
+    from unittest.mock import AsyncMock
+    instance = MeetingOrchestrator(load_config(), use_mocks=True)
+    start = AsyncMock()
+    monkeypatch.setattr(instance, "start_meeting", start)
+    client = TestClient(create_app(instance))
+    result = client.post("/api/meeting/start", json={"noise_suppression": False, "echo_cancellation": True})
+    assert result.status_code == 200
+    assert start.call_args.kwargs["noise_suppression"] is False
+    assert start.call_args.kwargs["echo_cancellation"] is True
     instance.device_manager.close()

@@ -12,6 +12,7 @@ from voice_translator.asr.base import ASRAdapter, ASRSession
 from voice_translator.asr.mock_backend import MockASRAdapter
 from voice_translator.asr.whisper_backend import WhisperASRAdapter
 from voice_translator.audio.devices import AudioDeviceManager, DeviceInfo
+from voice_translator.audio.processing import EchoReferenceBuffer, MicrophoneProcessor
 from voice_translator.config.languages import (
     defaults as language_defaults,
     language_choices,
@@ -222,6 +223,8 @@ class MeetingOrchestrator:
         ptt_key: Optional[str] = None,
         overlay_enabled: Optional[bool] = None,
         asr_model: str = "configured",
+        noise_suppression: Optional[bool] = None,
+        echo_cancellation: Optional[bool] = None,
     ):
         if context_prompt and context_prompt.strip():
             self.config.asr.initial_prompt = context_prompt.strip()
@@ -262,6 +265,9 @@ class MeetingOrchestrator:
         if asr_model != "configured":
             await self._select_asr(asr_model)
         self.config.controls = controls
+        for key, value in (("noise_suppression", noise_suppression), ("echo_cancellation", echo_cancellation)):
+            if value is not None:
+                setattr(self.config.audio, key, value)
         self.input_mode = resolve_input_mode(controls.app_preset, controls.input_mode)
         if overlay_enabled is not None:
             self.config.overlay.enabled = overlay_enabled
@@ -307,6 +313,20 @@ class MeetingOrchestrator:
                 self.current_meeting_id = None
                 raise
 
+        # A separate bounded loopback tap feeds AEC even while incoming ASR is
+        # busy or subtitles are paused. DSP remains in the outgoing worker.
+        echo_reference = None
+        microphone_processor = None
+        if not self.use_mocks and (self.config.audio.noise_suppression or self.config.audio.echo_cancellation):
+            try:
+                if self.config.audio.echo_cancellation:
+                    echo_reference = EchoReferenceBuffer(self.config.audio.sample_rate, self.config.audio.frame_duration_ms)
+                microphone_processor = MicrophoneProcessor(self.config.audio, echo_reference)
+            except Exception as exc:
+                self.last_start_error = str(exc)
+                self.current_meeting_id = None
+                raise
+
         # Outgoing Pipeline
         if mic_dev and ren_dev:
             self.outgoing_pipeline = OutgoingPipeline(
@@ -322,6 +342,7 @@ class MeetingOrchestrator:
                 on_latency_callback=self._on_latency_event,
             )
             self.outgoing_pipeline.set_source_language(source)
+            self.outgoing_pipeline.microphone_processor = microphone_processor
             self.outgoing_pipeline.set_target_language(target)
             try:
                 await self.outgoing_pipeline.start()
@@ -345,6 +366,7 @@ class MeetingOrchestrator:
                 on_latency_callback=self._on_latency_event,
             )
             self.incoming_pipeline.set_languages(target, source)
+            self.incoming_pipeline.echo_reference = echo_reference
             try:
                 await self.incoming_pipeline.start()
             except Exception as exc:
@@ -431,6 +453,8 @@ class MeetingOrchestrator:
         return {"controls": self.controls_snapshot(), "asr_models": asr_choices(self.config.asr.model_path),
                 "presets": [{"id": key, "label": data[0], "input_mode": data[1], "guidance": data[2]}
                             for key, data in APP_PRESETS.items()],
+                "audio_processing": {"noise_suppression": self.config.audio.noise_suppression,
+                                     "echo_cancellation": self.config.audio.echo_cancellation},
                 "languages": language_choices(self.config),
                 "language_defaults": {"source": self.source_language, "target": self.target_language}}
 

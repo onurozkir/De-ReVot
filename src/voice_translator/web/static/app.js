@@ -1,4 +1,4 @@
-// Realtime Voice Translator UI Client
+// De-ReVot UI Client
 
 document.addEventListener("DOMContentLoaded", () => {
   const statusBadge = document.getElementById("statusBadge");
@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const loopbackSelect = document.getElementById("loopbackSelect");
   const renderSelect = document.getElementById("renderSelect");
   const profileSelect = document.getElementById("profileSelect");
+  const profileError = document.getElementById("profileError");
   const sourceLanguageSelect = document.getElementById("sourceLanguageSelect");
   const targetLanguageSelect = document.getElementById("targetLanguageSelect");
   const languageHelp = document.getElementById("languageHelp");
@@ -20,6 +21,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const pttKeyInput = document.getElementById("pttKeyInput");
   const overlayEnabled = document.getElementById("overlayEnabled");
   const asrModelSelect = document.getElementById("asrModelSelect");
+  const noiseSuppression = document.getElementById("noiseSuppression");
+  const echoCancellation = document.getElementById("echoCancellation");
   const btnPTT = document.getElementById("btnPTT");
   const btnPause = document.getElementById("btnPause");
   const btnMute = document.getElementById("btnMute");
@@ -118,7 +121,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     languageHelp.textContent =
-      `Konuştuğum dil ASR'yi, toplantı dili çeviriyi ve klonlanmış sesi, gelen alt yazılar da konuştuğum dile çevrilir. ` +
+      `The language I speak is ASR, the meeting language is translation and cloned voice, and the incoming subtitles are also translated into the language I'm speaking. ` +
       (sourceEntry ? `Pair ${currentSource} ➔ ${currentTarget}: ` +
         (sourceEntry.pairs[currentTarget] === "opus" ? "dedicated OPUS model" :
          sourceEntry.pairs[currentTarget] === "nllb" ? "NLLB-200" : "model required") : "");
@@ -156,6 +159,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const response = await fetch("/api/session/options");
     const data = await response.json();
     presets = data.presets;
+    noiseSuppression.checked = data.audio_processing.noise_suppression;
+    echoCancellation.checked = data.audio_processing.echo_cancellation;
     appPresetSelect.replaceChildren(...presets.map(p => new Option(p.label, p.id)));
     appPresetSelect.value = localStorage.getItem("voice_trans_app_preset") || data.controls.app_preset;
     if (!appPresetSelect.value) appPresetSelect.value = data.controls.app_preset;
@@ -234,10 +239,12 @@ document.addEventListener("DOMContentLoaded", () => {
       profData.profiles.forEach(p => {
         const opt = document.createElement("option");
         opt.value = p.id;
-        opt.textContent = `${p.display_name} (${p.backend})`;
+        opt.textContent = `${p.display_name} (${p.reference_count} WAV, ${p.backend})`;
         if (savedProfile === p.id || (!savedProfile && p.is_default)) opt.selected = true;
         profileSelect.appendChild(opt);
       });
+      profileError.textContent = Object.values(profData.errors || {}).join("; ");
+      let selectedProfile = profileSelect.value;
 
       // 2b. Fetch language registry
       const langRes = await fetch("/api/languages");
@@ -259,8 +266,10 @@ document.addEventListener("DOMContentLoaded", () => {
       renderSelect.onchange = () => { localStorage.setItem("teams_trans_render", renderSelect.value); updateSelectedDeviceDetails(); };
       
       profileSelect.onchange = async () => {
-        localStorage.setItem("teams_trans_profile", profileSelect.value);
+        const requestedProfile = profileSelect.value;
+        profileError.textContent = "";
         if (currentMeetingStatus.toLowerCase() === "running") {
+          profileSelect.disabled = true;
           try {
             console.log("Live switching voice profile to:", profileSelect.value);
             const res = await fetch("/api/meeting/switch_voice", {
@@ -270,14 +279,18 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (!res.ok) {
               const err = await res.json().catch(() => ({}));
-              console.error("Failed to switch voice live:", err);
-            } else {
-              console.log("Voice switched successfully.");
+              throw new Error(err.detail || "Voice preparation failed.");
             }
           } catch (err) {
-            console.error("Network error switching voice:", err);
+            profileError.textContent = err.message;
+            profileSelect.value = selectedProfile;
+            return;
+          } finally {
+            profileSelect.disabled = false;
           }
         }
+        selectedProfile = requestedProfile;
+        localStorage.setItem("teams_trans_profile", selectedProfile);
       };
 
       if (targetLanguageSelect) {
@@ -341,6 +354,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       const outgoing = data.outgoing;
       const incoming = data.incoming;
+      const processing = outgoing?.processing;
+      document.getElementById("audioProcessingStatus").textContent = processing?.last_error
+        ? `Microphone processing failed; outgoing muted: ${processing.last_error}`
+        : processing
+          ? (processing.echo_cancellation && !processing.reference_available
+            ? "Echo reference incomplete. Check the speaker loopback selection; headphones recommended."
+            : `Noise reduction ${processing.noise_suppression ? "on" : "off"}; echo cancellation ${processing.echo_cancellation ? "on" : "off"}.`)
+          : "Microphone processing inactive.";
       updateLevel("mic", outgoing?.capture?.signal);
       updateLevel("loop", incoming?.capture?.signal);
       updateLevel("cable", outgoing?.render?.signal);
@@ -443,7 +464,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const norm = (status || "").toLowerCase();
     currentMeetingStatus = norm;
     document.getElementById("liveControls").hidden = norm !== "running";
-    for (const control of [appPresetSelect, asrModelSelect, pttKeyInput, micSelect, loopbackSelect, renderSelect]) {
+    for (const control of [appPresetSelect, asrModelSelect, pttKeyInput, micSelect, loopbackSelect, renderSelect, noiseSuppression, echoCancellation]) {
       control.disabled = norm === "running" || norm === "warming" || norm === "starting";
     }
     if (norm !== "running") uiPttPressed = false;
@@ -529,6 +550,8 @@ document.addEventListener("DOMContentLoaded", () => {
           ptt_key: pttKeyInput.value.trim(),
           overlay_enabled: overlayEnabled.checked,
           asr_model: asrModelSelect.value,
+          noise_suppression: noiseSuppression.checked,
+          echo_cancellation: echoCancellation.checked,
           prompt: promptInput ? promptInput.value.trim() : undefined,
         }),
       });

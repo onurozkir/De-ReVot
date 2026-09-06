@@ -16,6 +16,7 @@ from voice_translator.audio.capture import AudioCaptureEngine
 from voice_translator.audio.devices import DeviceInfo
 from voice_translator.audio.render import AudioRenderEngine
 from voice_translator.audio.resampler import AudioResampler
+from voice_translator.audio.processing import MicrophoneProcessor
 from voice_translator.config.languages import asr_prompt, defaults as language_defaults
 from voice_translator.config.models import AppConfig
 from voice_translator.config.presets import resolve_input_mode
@@ -63,6 +64,7 @@ class OutgoingPipeline:
         self.tts_adapter = tts_adapter
         self.voice_profile = voice_profile
         self.config = config
+        self.microphone_processor: MicrophoneProcessor | None = None
         default_source, default_target = language_defaults(config)
         self.source_language: str = default_source
         self.target_language: str = default_target
@@ -174,7 +176,8 @@ class OutgoingPipeline:
                     self._preroll.clear()
                 queue_age_ms = frame_size / self.capture_engine.sample_rate * 1000.0
             frame = self.capture_engine.read_samples(min(frame_size, available))
-            captured_at_ns = time.monotonic_ns() - int(queue_age_ms * 1e6) + round(len(frame) * 1e9 / self.capture_engine.sample_rate)
+            latest_capture_ns = self.capture_engine.last_callback_ns or time.monotonic_ns()
+            captured_at_ns = latest_capture_ns - int(queue_age_ms * 1e6) + round(len(frame) * 1e9 / self.capture_engine.sample_rate)
             await self._run_audio_work(frame, captured_at_ns, queue_age_ms)
 
     async def _run_audio_work(self, frame, captured_at_ns, queue_age_ms) -> None:
@@ -183,6 +186,22 @@ class OutgoingPipeline:
         await asyncio.shield(self._audio_inflight)
 
     def _process_gated_audio(self, frame, captured_at_ns, queue_age_ms) -> None:
+        if self.microphone_processor is not None and len(frame):
+            try:
+                frames = self.microphone_processor.process(frame, captured_at_ns)
+            except Exception as exc:
+                self.microphone_processor.last_error = str(exc)
+                self.set_routing_muted(True)
+                self._overloaded = True
+                self._emit_event({"type": "audio_processing_error", "direction": "outgoing", "error": str(exc)})
+                self._reject_current("audio_processing_error", "")
+                return
+            if frames:
+                self._route_audio(np.concatenate([audio for audio, _ in frames]), frames[-1][1], queue_age_ms)
+        else:
+            self._route_audio(frame, captured_at_ns, queue_age_ms)
+
+    def _route_audio(self, frame, captured_at_ns, queue_age_ms) -> None:
         for action in self.input_gate.route(frame, captured_at_ns):
             if not self.is_running:
                 break
@@ -473,6 +492,7 @@ class OutgoingPipeline:
             "direction": "outgoing", "asr_state": vad["phase"], "vad": vad,
             "input_mode": self.input_gate.mode, "ptt_pressed": self.input_gate.pressed,
             "routing_muted": self._routing_muted,
+            "processing": self.microphone_processor.snapshot() if self.microphone_processor else None,
             "last_rejection": self._last_rejection, "overloaded": self._overloaded,
             "audio_dropped_samples": self._dropped_audio_samples,
             "max_audio_queue_age_ms": self._max_queue_age_seen_ms,

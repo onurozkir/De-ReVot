@@ -93,6 +93,7 @@ class IncomingPipeline:
         self.paused = False
         self._delivery_generation = 0
         self._reset_requested = False
+        self.echo_reference = None
 
     async def start(self) -> None:
         if self.is_running:
@@ -115,6 +116,7 @@ class IncomingPipeline:
             ),
         )
         self.asr_session.metadata["meeting_id"] = self.meeting_id
+        self.capture_engine.echo_reference = self.echo_reference
         try:
             self.capture_engine.start()
         except Exception:

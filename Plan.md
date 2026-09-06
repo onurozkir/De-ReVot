@@ -1,4 +1,4 @@
-# Realtime Voice Translator for Meetings and Games
+# De-ReVot — Realtime Voice Translator for Meetings and Games
 
 > Canonical architecture and delivery plan. This document supersedes architectural
 > recommendations in the research history when they conflict with a DEC-Uxxx decision.
@@ -99,6 +99,15 @@ Teams bot, cloud service, multi-tenant system, or commercial product. [DEC: DEC-
 
 ### 1.2 Target Milestones Driven by Active Issue Roadmap
 
+2026-09-06 delivery for #16/#20 and De-ReVot naming: 170 unit/integration tests
+passed (`python -m pytest tests/ -q`), native WebRTC negative controls and real
+six-reference XTTS CUDA/disk-cache smoke passed. WLK mock UI was inspected in a
+browser (new branding, microphone processing controls and reference count).
+`git diff --check` passed. Remaining warnings are dependency deprecations.
+Real outdoor acoustics, physical speaker echo/double-talk quality and 30-minute
+full-duplex acceptance remain UNKNOWN; software completion does not close those
+hardware gates. See §8.4 and §15 for measured evidence and limitations.
+
 The following active GitHub issues define the authoritative delivery targets for the system:
 
 | Issue | Title | Architectural Scope & Target |
@@ -108,12 +117,11 @@ The following active GitHub issues define the authoritative delivery targets for
 | #26 | Add Systran/faster-whisper-large-v3 to Eliminate Hallucinations | Replace/augment 4-layer turbo decoder with full 32-layer decoder; implement speech-rate / acoustic duration gate (`chars/sec`) to reject non-speech hallucinations without word blacklists. |
 | #25 | Universal Application Support (Zoom, Meet, Discord, Slack, VRChat, Online Games) | Application presets, dynamic audio routing, floating HUD subtitle overlay, global hotkeys, and Dual Input Modes: Voice Activity (Meeting Mode) vs Push-to-Talk (Gaming Mode with 0 ms key-release endpointing and 150 ms pre-roll buffer). |
 | #9 | True Streaming TTS Chunking | Move from sentence-level synthesis to incremental generator/stream synthesis in XTTS, reducing TTS TTFA from full utterance time to <300 ms. |
-| #16 | Acoustic Echo Cancellation (AEC) | Implement WebRTC AEC3 / SpeexDSP between physical mic and loopback render to eliminate speaker-to-mic bleed without headsets. |
+| #16 | Acoustic Echo Cancellation (AEC) | Native WebRTC NS/AEC implemented; offline attenuation measured in §8.4. Real speaker/outdoor acceptance remains open. |
 | #12 | Render Gain Staging & Limiting | Soft limiter / AGC / peak compressor in audio render engine to eliminate digital clipping across all volume levels. |
 | #1 | Toggle Incoming Audio Translation & Pass-Through | UI toggle to switch between translating incoming audio or passing original sound through directly. |
 | #20 | Multi-Reference Voice Cloning Guide & Workflow | Documentation and tooling for recording 6 clean 8–10s WAV reference samples for optimal XTTS speaker similarity. |
 | #15 | Benchmark Gates B2–B6 | Systematically run and report P50/P95 latency, RTF, VRAM, and soak evidence on target hardware. |
-| #29 | Standalone Windows Desktop App, Inno Setup Installer & First-Run Onboarding Wizard | Lightweight Inno Setup installer (`TeamsTranslator-Setup.exe`), pywebview Edge WebView2 native desktop window, system tray daemon (`pystray`), automated VB-CABLE driver installer helper, interactive model downloader wizard with resume & SHA256 verification, and in-app voice cloning onboarding recorder. |
 
 ## 2. User Decisions
 
@@ -135,6 +143,9 @@ These decisions are authoritative until the user explicitly changes them.
 | DEC-U012 | Desktop subtitles accompany WLK | A native Win32 transparent, click-through, always-on-top, no-activate HUD starts with local sessions by default. WLK stays the primary interface. HUD supports desktop/borderless use; exclusive-fullscreen and anti-cheat compatibility require application testing. [REF: ISSUE-25] |
 | DEC-U013 | Acoustic filtering without word censorship | Never blacklist “teşekkür ederim”, “abone ol”, subtitle phrases or prompt words. Add pinned Systran/faster-whisper-large-v3 as an offline option; compare against turbo on target hardware before changing the latency default. A larger decoder does not guarantee zero hallucinations. [REF: ISSUE-26; HF-LARGE-V3] |
 | DEC-U014 | Desktop Distribution & Onboarding Wizard | The system supports packaging as a standalone Windows desktop app via Inno Setup installer, pywebview (Edge WebView2) desktop container, system tray daemon (`pystray`), automated VB-CABLE driver setup helper, model downloader wizard, and in-app voice cloning onboarding. [DEC: DEC-U014] |
+| DEC-U015 | Microphone environmental noise and speaker echo reduction | Add native offline WebRTC NS and AEC before outgoing input admission/VAD/ASR, with physical loopback reference. Keep full duplex and no phrase blacklist; no blanket incoming-speech ducking. User clarification 2026-09-06 expands #16 to vehicle/outdoor noise. [REF: ISSUE-16; WEBRTC-PYPI] |
+| DEC-U016 | Six-reference XTTS workflow | Support six clean 8–10s WAVs, deterministic discovery/conditioning, clear validation and cache reuse; preserve single-WAV manifests. This is conditioning, not model training or an emotion guarantee. [REF: ISSUE-20] |
+| DEC-U017 | Product name: De-ReVot | “De” comes from Demir, followed by Realtime Voice Translator. Rename product UI/CLI/docs and distribution metadata to `de-revot`; preserve `voice_translator` imports, environment names, stored preferences and existing GitHub remote URL. [REF: USER-2026-09-06] |
 
 ## 3. Superseded Research Decisions
 
@@ -427,6 +438,48 @@ These are ordered upgrades, not competing baseline architectures. A
 process-loopback helper must remain native Windows and requires an explicit
 decision before native helper code is added. [REF: SRC-FINAL:B006:L206-L235;
 SRC-05:B002:L52-L60]
+
+### 8.4 Microphone NS/AEC implementation (#16)
+
+`audio/processing.py` wraps pinned `aec-audio-processing==1.0.1` (BSD-3-Clause,
+Windows CPython 3.12 wheel). This is WebRTC AudioProcessing; it is not labeled
+AEC3. No model weights, GPU allocation, AGC or word blacklist is added. Default
+`audio.noise_suppression=true`, `echo_cancellation=true`, NS level 2 (0–3).
+Both switches appear in the WLK next-session controls. [DEC: DEC-U015]
+
+The loopback callback makes a bounded PCM copy into a separate one-second
+timestamped reference history. It performs no DSP, inference or I/O. Outgoing
+worker DSP consumes that history before PTT/VAD, including while PTT is released;
+incoming ASR stalls/pauses cannot stop reference collection. Input is mono PCM16
+in exact 10ms native blocks; capture rates 8/16/32/48 kHz are supported. Processed
+blocks are recombined before VAD to retain capture-frame confirmation semantics.
+Gaps reset partial PCM and adaptive filter state. Missing reference is observable;
+it does not disable local speech. DSP failure mutes outgoing with a visible error.
+
+`audio.echo_delay_ms=50` is a tunable loopback-to-mic capture offset. History is
+selected with one 10ms causal block remaining for WebRTC's filter bank; aligning
+the reference exactly to the echo regressed synthetic attenuation to ~3–5 dB.
+Capture callback timestamps anchor outgoing frames; callback timing, endpoint
+clock drift, real room reflections and double-talk quality need hardware gates.
+There is no additional microphone wait for the reference and no blanket ducking.
+
+MEASURED 2026-09-06, native Windows target PC, 48 kHz, 1200 ten-ms frames per
+scenario via `scripts/benchmark_audio_processing.py`:
+
+| Scenario | DSP P50/P95 ms | RTF | Attenuation |
+|---|---|---|---|
+| Synthetic stationary noise, NS | 0.0251 / 0.0272 | 0.00256 | 16.77 dB |
+| Synthetic delayed echo + short reflection, AEC | 0.1088 / 0.1251 | 0.01114 | 20.14 dB |
+| Existing local speech + synthetic echo/noise, NS+AEC | 0.1151 / 0.1301 | 0.01161 | Total mixture level change only; not a speech-quality score |
+
+DSP GPU allocation is 0 bytes by design (CPU native DSP). These synchronous
+offline measurements exclude ASR/MT/TTS and hardware capture. Queue age, real
+vehicle-triggered hallucinations/WER, speaker-bleed elimination in a live call,
+double-talk listening quality and 30-minute full-duplex soak are UNKNOWN.
+Evidence: `benchmarks/audio/processing-2026-09-06.json`. Headphones remain the
+most reliable isolation; UI reports an incomplete reference instead of claiming
+that speaker bleed was measured. #12 render limiting and #1 pass-through remain
+separate open work. [REF: ISSUE-16; WEBRTC-PYPI]
 
 ## 9. WhisperLiveKit Integration
 
@@ -737,8 +790,8 @@ Canonical profile layout:
 ~~~text
 voices/
 └── onur-default/
-    ├── reference.wav
-    ├── profile.json
+    ├── voice_01.wav ... voice_06.wav
+    ├── profile.json                 # optional
     └── cache/
 ~~~
 
@@ -752,7 +805,7 @@ Minimum profile manifest fields:
 | id | Stable filesystem/database identifier |
 | display_name | UI label |
 | backend | TTS adapter identifier |
-| reference_audio | Relative profile path or approved absolute external path |
+| reference_audio_paths | Explicit multi-WAV list; legacy reference_audio_path selects one file; omit both to discover immediate WAV children |
 | reference_text | Exact reference transcript when required |
 | reference_language | Normally tr for Onur source audio |
 | target_language | Normally en for the outgoing pipeline |
@@ -760,11 +813,36 @@ Minimum profile manifest fields:
 | consent_recorded_at | Local provenance/consent timestamp |
 | backend_options | Non-secret adapter-specific JSON |
 
-Speaker embeddings, latents, tokenized prompts, or conditioning tensors are
-computed during profile preparation/warmup and cached under a key containing
-audio content hash, normalized transcript hash, backend/model revision, and
-conditioning parameters. A cache mismatch triggers recomputation before Ready,
-never per text chunk. [REF: SRC-FINAL:B008:L286-L330]
+XTTS conditioning is prepared before Ready/session start/profile use. Discovery,
+validation and content hashing live in `tts/conditioning.py`; explicit manifests
+never silently add or omit files. Missing, corrupt, non-finite, ≤4 KB or mono-RMS
+<0.005 references fail with a path. Duration outside 3–30 seconds, clipped samples,
+stereo and mixed rates warn; files are never rewritten. The detailed six Turkish
+recording scripts live only in `docs/voice-recording-guide.md`. [DEC: DEC-U016]
+
+Sorted references feed both hashing and XTTS. The cache key includes audio
+digests, versioned conditioning settings and local model identity (absolute path,
+checkpoint size/mtime, config/vocab/download-manifest hashes, Coqui runtime).
+Checkpoint metadata detects ordinary local replacement; it is not a cryptographic
+digest of the complete checkpoint. XTTS does not consume reference_text, so that
+field does not affect its cache. Disk loads use finite tensor validation and
+weights_only=True. Prepared synthesis uses an in-memory snapshot without WAV
+reads/hashes/extraction; edits apply at the next explicit prepare. [REF: ISSUE-20]
+
+All six samples contribute to the speaker embedding. `gpt_cond_len=30` uses only
+the first 30 seconds of concatenated audio, and `max_ref_length=60` caps each
+reference. This is zero-shot conditioning, not fine-tuning or automatic prosody
+control. The existing single-reference path remains supported.
+
+MEASURED real XTTS-v2 CUDA smoke on 2026-09-06: six 9-second slices of the
+existing local recording (not six curated performances), valid latent shapes
+`[1,32,1024]` and `[1,512,1]`, extraction 1.044 s, validated disk reload 0.051 s.
+Three English sentences synthesized: pseudo-streaming TTFA P50/P95
+1010.04/1180.95 ms, aggregate RTF 0.318, peak Torch allocated 1,960,935,424 bytes.
+This includes no ASR/MT contention; queue age, full-duplex soak, speaker similarity
+and improvement over one reference are UNKNOWN. Evidence:
+`benchmarks/tts/multi-reference-2026-09-06.json`. True streaming TTS (#9) remains
+separate work. [REF: ISSUE-20; SRC-FINAL:B008:L286-L330]
 
 The filesystem manifest is the portable profile definition. SQLite mirrors
 searchable metadata and selection state; it does not store the reference WAV or
@@ -1288,8 +1366,8 @@ regardless of weighted score. [REF: SRC-01:B004:L31-L38]
 | M — universal application support (Issue #25) | Presets for Teams, Zoom, Meet, Discord, Slack, VRChat, Dota 2, PUBG, CS2; floating HUD subtitle overlay, global hotkeys, Dual Input Modes (Voice Activity vs PTT with 150 ms pre-roll and 0 ms release flush) | Clean audio routing verified on non-Teams clients; PTT 0 ms release and pre-roll verified; HUD click-through passes | Local HUD/PTT smoke passed; per-application remote-call routing remains a separate hardware gate |
 | N — true streaming TTS (Issue #9) | Chunked / generator streaming synthesis in XTTS adapter | First PCM TTFA drops from full sentence time to <300 ms | Existing XTTS-v2 |
 | O — acoustic conditioning & AEC (Issues #16, #12, #1) | WebRTC AEC3 / SpeexDSP acoustic echo cancellation, render gain staging & soft limiter, pass-through toggle | Speaker bleed eliminated under open mic; zero digital clipping on loud utterances | None |
-| P — voice dataset tooling (Issue #20) | Multi-reference 6-sample WAV recording guide, automated clipping/RMS validator | High speaker similarity score across multiple reference clips | Local voice profiles |
-| Q — desktop packaging & onboarding (Issue #29) | Inno Setup installer (`TeamsTranslator-Setup.exe`), pywebview Edge native desktop window, pystray system tray daemon, VB-CABLE auto-installer helper, interactive model downloader wizard with resume & SHA256, in-app voice cloning onboarding recorder | Single installer builds cleanly; VB-CABLE installs with 1 click; models download with resume/progress; voice sample records & clones in-app | None (wizard handles acquisition) |
+| P — voice dataset tooling (Issue #20) | Six-WAV discovery, validation, cache and recording guide implemented | Real six-reference XTTS CUDA smoke passed; speaker-similarity improvement remains UNKNOWN | Local voice profiles, §15 |
+| Q — desktop packaging & onboarding (Issue #29) | Inno Setup installer (`De-ReVot-Setup.exe`), pywebview Edge native desktop window, pystray system tray daemon, VB-CABLE auto-installer helper, interactive model downloader wizard with resume & SHA256, in-app voice cloning onboarding recorder | Single installer builds cleanly; VB-CABLE installs with 1 click; models download with resume/progress; voice sample records & clones in-app | None (wizard handles acquisition) |
 
 This ordering isolates device, ASR, MT, clone, routing, concurrency, and
 persistence failures. [REF: SRC-00:B007:L573-L624; SRC-FINAL:B018:L512-L551]
@@ -1394,6 +1472,10 @@ or superseded content is cited only with the explicit correction in this Plan.
 
 | Source ID | File | Block | Lines | Heading / Description |
 |---|---|---|---|---|
+| ISSUE-16 | https://github.com/onurozkir/speech-to-translate-en-tr/issues/16 | current | 2026-09-06 clarification | Native NS/AEC implementation and offline evidence; physical/outdoor gates remain |
+| ISSUE-20 | https://github.com/onurozkir/speech-to-translate-en-tr/issues/20 | current | 2026-09-06 implementation | Six-reference discovery, validation, cache, recording scripts and real CUDA smoke |
+| WEBRTC-PYPI | https://pypi.org/project/aec-audio-processing/1.0.1/ | pinned package | accessed 2026-09-06 | BSD-3-Clause, Windows CPython 3.12 wheel, WebRTC NS/AEC API; no AEC3 claim |
+| USER-2026-09-06 | Current user request | naming | 2026-09-06 | De-ReVot: Demir + Realtime Voice Translator |
 | ISSUE-25 | https://github.com/onurozkir/speech-to-translate-en-tr/issues/25 | current | 2026-09-05 user clarification; resolved 2026-09-06 | Universal apps/games, same-session PTT, automatic secondary HUD, retain VB-CABLE; process loopback deferred (DEC-U010) |
 | ISSUE-26 | https://github.com/onurozkir/speech-to-translate-en-tr/issues/26 | current | 2026-09-05 user clarification; resolved 2026-09-06 | Full large-v3 option; preserve genuine spoken phrases. Large-v3 partial P50/P95 587/933 ms vs turbo 243/366 ms; turbo keeps latency default |
 | ISSUE-27 | https://github.com/onurozkir/speech-to-translate-en-tr/issues/27 | current | resolved 2026-09-06 | Dynamic source/target language selection; live switch updates ASR, MT, TTS; TR/EN/FR shipped |

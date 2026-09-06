@@ -1,0 +1,47 @@
+{
+  "platform": "Windows-11-10.0.26200-SP0",
+  "package": "aec-audio-processing==1.0.1",
+  "sample_rate": 48000,
+  "seconds": 12,
+  "synthetic_noise": {
+    "status": "MEASURED",
+    "frames": 1200,
+    "p50_ms": 0.0251,
+    "p95_ms": 0.0272,
+    "rtf": 0.0025557916666666667,
+    "attenuation_db": 16.768158298926757,
+    "reference_missing_frames": 0,
+    "vram_bytes": 0,
+    "queue_age_ms": "UNKNOWN: offline synchronous processing",
+    "full_duplex_soak": "UNKNOWN: no ASR/MT/TTS or physical audio"
+  },
+  "synthetic_echo": {
+    "status": "MEASURED",
+    "frames": 1200,
+    "p50_ms": 0.10875,
+    "p95_ms": 0.125105,
+    "rtf": 0.011141191666666666,
+    "attenuation_db": 20.141606035068833,
+    "reference_missing_frames": 4,
+    "vram_bytes": 0,
+    "queue_age_ms": "UNKNOWN: offline synchronous processing",
+    "full_duplex_soak": "UNKNOWN: no ASR/MT/TTS or physical audio"
+  },
+  "outdoor_vehicle_hallucinations": "UNKNOWN: requires labeled vehicle/traffic recordings and ASR",
+  "speech_quality": "UNKNOWN: listener evaluation required",
+  "speech_corpus_sha256": "01b06c2040649c70cef8dbbecf9a89b760a681a0655e4bb069581699cec3aabf",
+  "synthetic_double_talk_with_local_speech": {
+    "status": "MEASURED",
+    "frames": 1200,
+    "p50_ms": 0.11505,
+    "p95_ms": 0.13011499999999998,
+    "rtf": 0.011605041666666668,
+    "attenuation_db": 5.227410480448684,
+    "reference_missing_frames": 4,
+    "vram_bytes": 0,
+    "queue_age_ms": "UNKNOWN: offline synchronous processing",
+    "full_duplex_soak": "UNKNOWN: no ASR/MT/TTS or physical audio",
+    "input_snr_db": -0.7125736418312895
+  },
+  "listening_output": "benchmarks\\audio\\processing-2026-09-06.wav"
+}

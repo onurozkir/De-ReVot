@@ -32,6 +32,14 @@
 
 ---
 
+### Acoustic frontend and voice dataset additions (#16 / #20)
+
+| Task | Source | Tests / tools |
+|---|---|---|
+| Noise suppression / echo reference | `src/voice_translator/audio/processing.py`, `src/voice_translator/audio/capture.py` | `tests/unit/test_audio_processing.py`, `scripts/benchmark_audio_processing.py` |
+| Acoustic lifecycle / pipeline admission | `src/voice_translator/streaming/pipeline_outgoing.py`, `src/voice_translator/streaming/pipeline_incoming.py`; wiring in mapped orchestrator | `tests/unit/test_pipeline_ptt.py`, `tests/integration/test_full_pipeline_mock.py` |
+| Reference validation / recording instructions | `src/voice_translator/tts/conditioning.py`, `docs/voice-recording-guide.md` | `tests/unit/test_tts_quality.py`, `scripts/validate_voice_profile.py` |
+
 ## 2. Directory Structure & File Index
 
 ### `src/voice_translator/`

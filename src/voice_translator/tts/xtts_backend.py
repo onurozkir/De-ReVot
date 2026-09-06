@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import os
 import threading
 from contextlib import contextmanager
@@ -98,12 +100,16 @@ class XTTSv2Adapter(TTSAdapter):
         if self.repetition_penalty <= 0:
             raise ValueError("XTTS repetition_penalty must be greater than zero.")
         self._latents_cache: Dict[str, Tuple[Any, Any]] = {}
+        self._prepared_profiles: dict[tuple, str] = {}
+        self._model_identity = "uninitialized"
         self._is_warm = False
 
     def initialize(self, model_path: str, device: str = "cuda", sample_rate: int = 24000):
         self.model_path = model_path
         self.device = device
         self.sample_rate = sample_rate
+        self._latents_cache.clear()
+        self._prepared_profiles.clear()
 
         p = Path(model_path)
         if not p.exists():
@@ -134,6 +140,17 @@ class XTTSv2Adapter(TTSAdapter):
         )
         if device == "cuda" and torch.cuda.is_available():
             self.model.cuda()
+        # Local checkpoint metadata plus config/provenance content identifies the
+        # offline model without rehashing gigabytes on every profile switch.
+        identity = {"path": str(p.resolve()), "runtime": "coqui-tts==0.27.5"}
+        for name in ("model.pth", "config.json", "vocab.json", "download-manifest.json"):
+            file = p / name
+            if file.is_file():
+                stat = file.stat()
+                identity[name] = [stat.st_size, stat.st_mtime_ns]
+                if file.suffix == ".json":
+                    identity[name].append(hashlib.sha256(file.read_bytes()).hexdigest())
+        self._model_identity = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         logger.info("XTTS-v2 model loaded successfully.")
 
     def warmup(self):
@@ -167,17 +184,17 @@ class XTTSv2Adapter(TTSAdapter):
         if self.model is None:
             raise RuntimeError("Model must be initialized before preparing voice profiles.")
 
-        ref_paths = [Path(p) for p in profile.all_reference_paths]
-        valid_paths = [p for p in ref_paths if p.exists()]
-        if not valid_paths:
-            raise RuntimeError(
-                f"Voice reference audio not found for profile '{profile.display_name}'."
-            )
-
-        audio_hash = VoiceProfileManager.compute_audio_hash([str(p) for p in valid_paths])
-        cache_key = f"{profile.id}_{audio_hash}"
+        signature = (profile.id, tuple(profile.all_reference_paths))
+        self._prepared_profiles.pop(signature, None)
+        valid_paths = profile.all_reference_paths
+        VoiceProfileManager.validate_reference_audio(valid_paths)
+        audio_hash = VoiceProfileManager.compute_audio_hash(valid_paths)
+        identity = [audio_hash, self._model_identity, "gpt_cond_len=30", "max_ref_length=60",
+                    "sound_norm_refs=false", "load_sr=22050", "conditioning-v2"]
+        cache_key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
         if cache_key in self._latents_cache:
+            self._prepared_profiles[signature] = cache_key
             return
 
         # Check disk cache
@@ -186,8 +203,12 @@ class XTTSv2Adapter(TTSAdapter):
 
         if cache_file.exists():
             try:
-                latents = torch.load(str(cache_file), map_location=self.device)
+                latents = torch.load(str(cache_file), map_location=self.device, weights_only=True)
+                if (not isinstance(latents, (tuple, list)) or len(latents) != 2
+                        or not all(torch.is_tensor(t) and t.numel() and torch.isfinite(t).all() for t in latents)):
+                    raise ValueError("Invalid conditioning tensors")
                 self._latents_cache[cache_key] = latents
+                self._prepared_profiles[signature] = cache_key
                 logger.info(f"Loaded voice conditioning cache for profile '{profile.display_name}' from disk.")
                 return
             except Exception as e:
@@ -199,7 +220,7 @@ class XTTSv2Adapter(TTSAdapter):
         )
         with _scoped_xtts_audio_loader():
             gpt_cond_latent, speaker_embedding = self.model.get_conditioning_latents(
-                audio_path=[str(p.resolve()) for p in valid_paths],
+                audio_path=valid_paths,
                 gpt_cond_len=30,
                 max_ref_length=60,
                 sound_norm_refs=False,
@@ -207,6 +228,7 @@ class XTTSv2Adapter(TTSAdapter):
 
         latents = (gpt_cond_latent, speaker_embedding)
         self._latents_cache[cache_key] = latents
+        self._prepared_profiles[signature] = cache_key
 
         # Save to disk
         try:
@@ -225,12 +247,11 @@ class XTTSv2Adapter(TTSAdapter):
         if self.model is None or not text.strip():
             return
 
-        valid_paths = [Path(p) for p in profile.all_reference_paths if Path(p).exists()]
-        audio_hash = VoiceProfileManager.compute_audio_hash([str(p) for p in valid_paths])
-        cache_key = f"{profile.id}_{audio_hash}"
-
-        if cache_key not in self._latents_cache:
+        signature = (profile.id, tuple(profile.all_reference_paths))
+        cache_key = self._prepared_profiles.get(signature)
+        if cache_key is None:
             self.prepare_voice_profile(profile)
+            cache_key = self._prepared_profiles.get(signature)
 
         if cache_key in self._latents_cache:
             gpt_cond_latent, speaker_embedding = self._latents_cache[cache_key]
@@ -264,4 +285,5 @@ class XTTSv2Adapter(TTSAdapter):
     def shutdown(self):
         self.model = None
         self._latents_cache.clear()
+        self._prepared_profiles.clear()
         self._is_warm = False

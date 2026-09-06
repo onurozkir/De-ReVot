@@ -1,7 +1,7 @@
 [project]
-name = "speech-to-translate"
+name = "de-revot"
 version = "0.1.0"
-description = "Local realtime voice translation for meetings and games"
+description = "De-ReVot: local realtime voice translation for meetings and games"
 requires-python = ">=3.12"
 
 dependencies = [
@@ -28,6 +28,7 @@ dependencies = [
   "uvicorn>=0.34",
   "soxr>=0.5",
   "coqui-tts==0.27.5",
+  "aec-audio-processing==1.0.1; sys_platform == 'win32'",
 ]
 
 [tool.uv.sources]

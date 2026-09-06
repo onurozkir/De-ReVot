@@ -20,6 +20,10 @@ class AudioConfig(BaseModel):
     mic_device_id: str = ""
     loopback_device_id: str = ""
     render_device_id: str = ""
+    noise_suppression: bool = True
+    echo_cancellation: bool = True
+    noise_suppression_level: int = Field(default=2, ge=0, le=3)
+    echo_delay_ms: int = Field(default=50, ge=0, le=500)
 
 
 class StreamingConfig(BaseModel):

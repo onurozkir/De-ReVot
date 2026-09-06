@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
+import os
+from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 import numpy as np
 
@@ -14,7 +16,7 @@ class VoiceProfile:
     id: str
     display_name: str
     backend: str
-    reference_audio_path: str
+    reference_audio_path: str = ""
     reference_audio_paths: List[str] = field(default_factory=list)
     reference_text: Optional[str] = None
     reference_language: str = "tr"
@@ -23,6 +25,10 @@ class VoiceProfile:
     is_default: bool = False
     conditioning_cache_path: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.reference_audio_path and self.reference_audio_paths:
+            self.reference_audio_path = self.all_reference_paths[0]
 
     @property
     def all_reference_paths(self) -> List[str]:
@@ -33,7 +39,7 @@ class VoiceProfile:
         for p in self.reference_audio_paths:
             if p and p not in paths:
                 paths.append(p)
-        return paths
+        return [str(p) for p in sorted({Path(os.path.abspath(p)) for p in paths})]
 
 
 class TTSAdapter(abc.ABC):

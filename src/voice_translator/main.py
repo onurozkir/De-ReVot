@@ -1,4 +1,4 @@
-"""Main CLI entrypoint for Realtime Voice Translator."""
+"""Main CLI entrypoint for De-ReVot."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def run_server(mock: bool = False, port: int = 8000, host: str = "127.0.0.1"):
         await orchestrator.shutdown()
 
     print(f"\n========================================================")
-    print(f" Starting Realtime Voice Translator on http://{host}:{port}")
+    print(f" Starting De-ReVot on http://{host}:{port}")
     print(f" Mock Mode: {mock}")
     print(f"========================================================\n")
 
@@ -92,7 +92,7 @@ def run_server(mock: bool = False, port: int = 8000, host: str = "127.0.0.1"):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Realtime Voice Translator")
+    parser = argparse.ArgumentParser(description="De-ReVot")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # run command

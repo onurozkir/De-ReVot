@@ -77,3 +77,35 @@ def test_mute_invalidates_already_committed_work_even_after_unmute():
     pipeline.set_routing_muted(True)
     pipeline.set_routing_muted(False)
     assert pipeline._delivery_cancelled(commits[0])
+
+
+def test_microphone_processing_runs_before_ptt_gate_and_vad():
+    pipeline, calls, commits, _ = make_pipeline()
+    processed = []
+
+    class Processor:
+        def process(self, frame, at_ns):
+            processed.append(at_ns)
+            return [(np.zeros_like(frame), at_ns)]
+
+    pipeline.microphone_processor = Processor()
+    pipeline.request_input("ptt", True, 200_000_000)
+    pipeline.request_input("ptt", False, 800_000_000)
+    for i in range(50):
+        pipeline._process_gated_audio(np.full(320, 0.1, dtype=np.float32), (i + 1) * 20_000_000, 20)
+    assert len(processed) == 50  # Also adapts while PTT is released.
+    assert not calls and not commits  # VAD sees filtered audio, not raw noise.
+
+
+def test_microphone_processing_failure_mutes_delivery():
+    pipeline, _, commits, events = make_pipeline()
+
+    class Processor:
+        def process(self, *args):
+            raise RuntimeError("DSP failed")
+
+    pipeline.microphone_processor = Processor()
+    pipeline._process_gated_audio(np.zeros(320, dtype=np.float32), 20_000_000, 20)
+    assert pipeline._routing_muted
+    assert not commits
+    assert any(e.get("error") == "DSP failed" for e in events)

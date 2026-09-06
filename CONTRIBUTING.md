@@ -1,6 +1,6 @@
-# Contributing to Teams Realtime Translator
+# Contributing to De-ReVot
 
-Thank you for your interest in contributing to **speech-to-translate-en-tr**! We welcome bug reports, feature requests, documentation improvements, and code contributions.
+De-ReVot welcomes bug reports, feature requests, documentation improvements, and code contributions.
 
 ---
 

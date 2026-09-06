@@ -24,6 +24,8 @@ class StartMeetingRequest(BaseModel):
     ptt_key: Optional[str] = None
     overlay_enabled: Optional[bool] = None
     asr_model: Literal["configured", "turbo", "large_v3"] = "configured"
+    noise_suppression: Optional[bool] = None
+    echo_cancellation: Optional[bool] = None
 
 
 class SessionControlsRequest(BaseModel):
@@ -97,11 +99,14 @@ def create_routes(orchestrator: MeetingOrchestrator) -> APIRouter:
                     "backend": p.backend,
                     "is_default": p.is_default,
                     "reference_language": p.reference_language,
+                    "reference_audio_paths": p.all_reference_paths,
+                    "reference_count": len(p.all_reference_paths),
                     "target_language": p.target_language,
                     "target_languages": getattr(p, "target_languages", [p.target_language]),
                 }
                 for p in profiles
-            ]
+            ],
+            "errors": orchestrator.profile_manager.errors,
         }
 
     @router.get("/session/options")
@@ -140,6 +145,8 @@ def create_routes(orchestrator: MeetingOrchestrator) -> APIRouter:
                 ptt_key=req.ptt_key,
                 overlay_enabled=req.overlay_enabled,
                 asr_model=req.asr_model,
+                noise_suppression=req.noise_suppression,
+                echo_cancellation=req.echo_cancellation,
             )
             return {"status": "ok", "meeting_id": orchestrator.current_meeting_id}
         except Exception as e:

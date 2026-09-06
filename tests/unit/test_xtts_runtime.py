@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import soundfile as sf
 
 from voice_translator.tts import xtts_backend
 from voice_translator.tts.base import VoiceProfile
@@ -29,6 +30,7 @@ def test_xtts_uses_configured_temperature_and_speed(tmp_path):
     adapter.model = FakeModel()
     cache_key = f"{profile.id}_{VoiceProfileManager.compute_audio_hash(str(reference))}"
     adapter._latents_cache[cache_key] = (SimpleNamespace(), SimpleNamespace())
+    adapter._prepared_profiles[(profile.id, tuple(profile.all_reference_paths))] = cache_key
 
     chunks = list(adapter.synthesize_committed("Hello", profile, "en"))
 
@@ -58,7 +60,7 @@ def test_xtts_missing_reference_fails_instead_of_using_zero_latents(tmp_path):
 
 def test_xtts_soundfile_workaround_is_scoped_to_conditioning_call(tmp_path):
     reference = tmp_path / "reference.wav"
-    reference.write_bytes(b"voice")
+    sf.write(reference, 0.1 * np.sin(2 * np.pi * 440 * np.arange(48000) / 16000), 16000)
     profile = VoiceProfile(
         "onur",
         "Onur",

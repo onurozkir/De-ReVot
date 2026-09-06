@@ -61,6 +61,7 @@ class AudioCaptureEngine:
         self.signal_meter = AudioSignalMeter()
         self.callback_count = 0
         self.captured_samples = 0
+        self.echo_reference = None
 
     def start(self):
         if self.is_running:
@@ -81,6 +82,8 @@ class AudioCaptureEngine:
                 self.discontinuity_count += 1
             mono_audio = downmix_to_mono(np.frombuffer(in_data, dtype=np.int16), self.channels)
             self.ring_buffer.write(mono_audio)
+            if self.echo_reference is not None:
+                self.echo_reference.push(mono_audio, self.last_callback_ns)
             return (None, pyaudio.paContinue)
 
         try:

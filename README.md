@@ -33,7 +33,7 @@ Translate your speech live between **Turkish**, **English** and **French** while
 ### Hardware
 - **Operating System**: Windows 11 (64-bit) native execution (required for native WASAPI loopback capture).
 - **GPU**: NVIDIA GPU with CUDA support and at least **12 GB VRAM** (16 GB VRAM recommended).
-  - Target hardware: NVIDIA GeForce RTX 5060 Ti (16 GB). See root `Plan.md` for measured results and remaining gates.
+  - Target hardware: NVIDIA GeForce RTX 5060 Ti (16 GB).
 - **RAM**: 16 GB minimum (32 GB recommended).
 - **Storage**: ~15 GB free NVMe / SSD disk space for offline model checkpoints.
 
@@ -73,7 +73,7 @@ Translate your speech live between **Turkish**, **English** and **French** while
 ### 2. Clone Repository & Setup Virtual Environment
 ```powershell
 # Clone the repository
-git clone https://github.com/onurozkir/speech-to-translate-en-tr.git
+git clone https://github.com/onurozkir/De-ReVot.git
 cd speech-to-translate-en-tr
 
 # Create Python 3.12 virtual environment
@@ -103,6 +103,7 @@ python scripts/download_models.py whisper
 # 2. Real-Time Translation (OPUS-MT with automatic INT8 quantization)
 python scripts/download_models.py mt-tr-en --convert-ct2
 python scripts/download_models.py mt-en-tr --convert-ct2
+python scripts/download_models.py mt-en-fr --convert-ct2
 
 # 3. Voice Cloning (XTTS-v2)
 python scripts/download_models.py xtts
@@ -215,7 +216,7 @@ same endpoint. The baseline does not isolate voice chat from game effects. A
 separate voice-output device can help when the game provides that setting.
 Process loopback would isolate incoming processes; it does not replace the
 outgoing virtual microphone, and is deferred here. No extra cable or paid
-translation service was added. See [Plan.md](Plan.md) §8.
+translation service was added.
 
 ## Push-to-Talk and Desktop Subtitles
 
@@ -283,8 +284,8 @@ mistakes. The model card documents its [CTranslate2 format and precision options
 Compare the same local audio excerpt with both models:
 
 ```powershell
-uv run python scripts/benchmark_asr_acoustics.py --model turbo --audio voices/onur-default/reference.wav --audio-offset 2 --audio-seconds 4 --output benchmarks/asr/results/turbo.json
-uv run python scripts/benchmark_asr_acoustics.py --model large_v3 --audio voices/onur-default/reference.wav --audio-offset 2 --audio-seconds 4 --output benchmarks/asr/results/large-v3.json
+uv run python scripts/benchmark_asr_acoustics.py --model turbo --audio voices/default/reference.wav --audio-offset 2 --audio-seconds 4 --output benchmarks/asr/results/turbo.json
+uv run python scripts/benchmark_asr_acoustics.py --model large_v3 --audio voices/default/reference.wav --audio-offset 2 --audio-seconds 4 --output benchmarks/asr/results/large-v3.json
 ```
 
 Reports separate raw output and guard acceptance, P50/P95, RTF, shared-ASR wait
@@ -296,13 +297,13 @@ Synthetic negatives and an ASR-only comparison do not prove a live-call or
 
 ---
 
-## Dynamic Languages (Konuştuğum Dil / Toplantı Dili)
+## Dynamic Languages
 
 The Web UI has two live-switchable selectors:
 
-- **Konuştuğum Dil**: ASR language of your microphone and the display language of
+- **My Language**: ASR language of your microphone and the display language of
   incoming subtitles.
-- **Toplantı Dili / Hedef Dil**: language of the cloned speech sent to the meeting
+- **Target Language**: language of the cloned speech sent to the meeting
   and the ASR language of the meeting loopback.
 
 Defaults are `tr` (source) and `en` (target). Switching during an active meeting
@@ -317,21 +318,21 @@ synthesize.
 
    ```toml
    [languages]
-   enabled = ["tr", "en", "fr", "de"]
+   enabled = ["tr", "en", "fr"]
 
-   [languages.definitions.de]
-   name = "Deutsch"
-   whisper_code = "de"
-   nllb_code = "deu_Latn"
+   [languages.definitions.en]
+   name = "English"
+   whisper_code = "en"
+   nllb_code = "en_Latn"
    xtts_supported = true
-   asr_prompt = "Besprechung, Deutsch, technisch, geschäftlich."
+   asr_prompt = "Meeting, English, technical, business."
    ```
 
 2. Download its MT pairs (pinned OPUS pairs when known, NLLB-200 fallback
    otherwise; never during startup):
 
    ```powershell
-   uv run python scripts/download_models.py --lang de
+   uv run python scripts/download_models.py --lang en
    ```
 
 3. Refresh the Web UI. The new language appears in both selectors.
@@ -359,8 +360,8 @@ other target languages are rejected before the session starts.
    - **Incoming Audio (Loopback)**: Your physical headphones/speakers with `[Loopback]`.
    - **VB-CABLE Render**: `CABLE Input (VB-Audio Virtual Cable)`.
    - **Voice Profile**: Choose your personal voice or an avatar voice.
-   - **Konuştuğum Dil**: Source language you speak (default `tr`).
-   - **Toplantı Dili / Hedef Dil**: Language the meeting hears and you read as subtitles (default `en`).
+   - **My Language**: Source language you speak (default `tr`).
+   - **My Language / Target Language**: Language the meeting hears and you read as subtitles (default `en`).
 4. Click **Start Meeting**.
 
 The Python package is now `voice_translator`, and the project skill lives at
@@ -377,16 +378,16 @@ python src/voice_translator/main.py run --mock
 
 ## Adding Custom Voice Profiles
 
-1. Create `voices/onur-six/` and record six clean WAVs with the same microphone,
+1. Create `voices/default/` and record six clean WAVs with the same microphone,
    speaker and room. Aim for 8–10 seconds each, without aggressive audio filters.
 2. Name them `voice_01.wav` through `voice_06.wav`. A manifest is optional; WAVs
    directly inside the directory are discovered in sorted order.
-3. Validate offline: `uv run python scripts/validate_voice_profile.py onur-six`.
-4. Restart, select **onur-six (6 WAV, xtts_v2)**, then Start Meeting. Preparation
+3. Validate offline: `uv run python scripts/validate_voice_profile.py default`.
+4. Restart, select **default (6 WAV, xtts_v2)**, then Start Meeting. Preparation
    happens before the voice is used; cached latents are reused during synthesis.
 
 ```text
-voices/onur-six/
+voices/default/
 ├── profile.json       # optional name, languages, explicit file list
 ├── voice_01.wav
 ├── voice_02.wav
@@ -436,12 +437,12 @@ most reliable way to avoid speaker bleed.
 Offline benchmark (no device recording):
 
 ```powershell
-uv run python scripts/benchmark_audio_processing.py --speech voices/onur-default/reference.wav --output benchmarks/audio/results/processing.json
+uv run python scripts/benchmark_audio_processing.py --speech voices/default/reference.wav --output benchmarks/audio/results/processing.json
 ```
 
 Synthetic noise/echo tests measure processing time and attenuation. Real outdoor
 speech quality, end-to-end queue age and 30-minute full-duplex soak remain separate
-gates; see [Plan.md](Plan.md) §8.4 for measured results and limits.
+gates.
 
 ---
 

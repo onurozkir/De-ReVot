@@ -29,6 +29,12 @@ ring_buffer_duration_sec = 5.0
 mic_device_id = ""
 loopback_device_id = ""
 render_device_id = ""
+noise_suppression = true
+echo_cancellation = true
+# WebRTC NS: 0 low, 1 moderate, 2 high, 3 very high. AGC stays off.
+noise_suppression_level = 2
+# Align captured speaker history to microphone echo; tune per endpoint if needed.
+echo_delay_ms = 50
 
 [streaming]
 vad_threshold = 0.5

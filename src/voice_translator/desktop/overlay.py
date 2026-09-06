@@ -188,7 +188,7 @@ class DesktopOverlay:
             width = min(self.config.width, screen_width)
             height = min(240, max(140, self.config.font_size * 6))
             x, y = (screen_width - width) // 2, max(0, screen_height - height - self.config.bottom_margin)
-            self.hwnd = user32.CreateWindowExW(self.EX_STYLE, class_name, "Voice Translator Subtitles", 0x80000000,
+            self.hwnd = user32.CreateWindowExW(self.EX_STYLE, class_name, "De-ReVot Subtitles", 0x80000000,
                                                x, y, width, height, None, None, instance, None)
             if not self.hwnd:
                 raise ct.WinError(ct.get_last_error())

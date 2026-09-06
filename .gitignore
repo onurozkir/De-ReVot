@@ -35,7 +35,8 @@ mcp_servers.json
 .kilocodingrules
 .kilo/
 .antigravity/
-docs/
+docs/*
+!docs/voice-recording-guide.md
 
 # Agents: Track the canonical project workflow
 .agents/*

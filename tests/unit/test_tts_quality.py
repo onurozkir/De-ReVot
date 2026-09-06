@@ -2,6 +2,8 @@ from types import SimpleNamespace
 from pathlib import Path
 import numpy as np
 import pytest
+import soundfile as sf
+import json
 
 from voice_translator.tts import xtts_backend
 from voice_translator.tts.base import VoiceProfile
@@ -62,6 +64,7 @@ def test_xtts_inference_passes_hyperparameters(tmp_path):
     adapter.model = FakeModel()
     cache_key = f"{profile.id}_{VoiceProfileManager.compute_audio_hash(str(ref1))}"
     adapter._latents_cache[cache_key] = (SimpleNamespace(), SimpleNamespace())
+    adapter._prepared_profiles[(profile.id, tuple(profile.all_reference_paths))] = cache_key
 
     chunks = list(adapter.synthesize_committed("Hello world", profile, "en"))
 
@@ -81,8 +84,8 @@ def test_xtts_inference_passes_hyperparameters(tmp_path):
 def test_multi_sample_hash_and_conditioning(tmp_path):
     ref1 = tmp_path / "reference_1.wav"
     ref2 = tmp_path / "reference_2.wav"
-    ref1.write_bytes(b"sample1")
-    ref2.write_bytes(b"sample2")
+    write_wav(ref1)
+    write_wav(ref2, frequency=600)
 
     profile = VoiceProfile(
         id="multi_speaker",
@@ -93,7 +96,7 @@ def test_multi_sample_hash_and_conditioning(tmp_path):
         conditioning_cache_path=str(tmp_path / "cache"),
     )
 
-    assert profile.all_reference_paths == [str(ref1), str(ref2)]
+    assert profile.all_reference_paths == [str(ref1.resolve()), str(ref2.resolve())]
 
     hash_single = VoiceProfileManager.compute_audio_hash(str(ref1))
     hash_multi = VoiceProfileManager.compute_audio_hash(profile.all_reference_paths)
@@ -116,4 +119,107 @@ def test_multi_sample_hash_and_conditioning(tmp_path):
     assert len(observed_audio_paths) == 2
     assert str(ref1.resolve()) in observed_audio_paths
     assert str(ref2.resolve()) in observed_audio_paths
+
+
+def write_wav(path, seconds=3.0, rate=16000, frequency=440, gain=0.1):
+    sf.write(path, gain * np.sin(2 * np.pi * frequency * np.arange(int(seconds * rate)) / rate), rate)
+
+
+@pytest.mark.parametrize("manifest", [None, {}, {"reference_audio_paths": [f"voice_{i:02}.wav" for i in range(6, 0, -1)]}])
+def test_six_reference_discovery_without_phantom_reference(tmp_path, manifest):
+    directory = tmp_path / "speaker"
+    directory.mkdir()
+    for i in range(6, 0, -1):
+        write_wav(directory / f"voice_{i:02}.wav")
+    (directory / "cache").mkdir()
+    write_wav(directory / "cache" / "ignored.wav")
+    if manifest is not None:
+        (directory / "profile.json").write_text(json.dumps(manifest))
+    profile = VoiceProfileManager(str(tmp_path)).get_default_profile()
+    assert len(profile.all_reference_paths) == 6
+    assert [Path(p).name for p in profile.all_reference_paths] == [f"voice_{i:02}.wav" for i in range(1, 7)]
+    assert profile.reference_audio_path == profile.all_reference_paths[0]
+
+
+def test_legacy_manifest_is_authoritative_and_missing_refs_are_retained(tmp_path):
+    directory = tmp_path / "speaker"
+    directory.mkdir()
+    write_wav(directory / "voice_01.wav")
+    (directory / "profile.json").write_text(json.dumps({"reference_audio_path": "missing.wav"}))
+    profile = VoiceProfileManager(str(tmp_path)).get_default_profile()
+    assert len(profile.all_reference_paths) == 1
+    with pytest.raises(RuntimeError, match="missing.wav.*not found"):
+        VoiceProfileManager.validate_reference_audio(profile.all_reference_paths)
+
+
+@pytest.mark.parametrize("kind", ["missing", "tiny", "corrupt", "silent", "nan"])
+def test_invalid_reference_fails_with_path(tmp_path, kind):
+    path = tmp_path / f"{kind}.wav"
+    if kind == "tiny":
+        path.write_bytes(b"RIFF")
+    elif kind == "corrupt":
+        path.write_bytes(b"invalid" * 1000)
+    elif kind == "silent":
+        write_wav(path, gain=0)
+    elif kind == "nan":
+        sf.write(path, np.full(16000, np.nan), 16000, subtype="FLOAT")
+    with pytest.raises(RuntimeError, match=f"{kind}.wav"):
+        VoiceProfileManager.validate_reference_audio([str(path)])
+
+
+def test_reference_warnings_and_order_independent_hash(tmp_path):
+    a, b = tmp_path / "a.wav", tmp_path / "b.wav"
+    write_wav(a, seconds=1, gain=1)
+    write_wav(b, rate=24000)
+    report = VoiceProfileManager.validate_reference_audio([str(a), str(b)])
+    assert any("duration" in w for w in report[0]["warnings"])
+    assert any("clipped" in w for w in report[0]["warnings"])
+    assert all(any("mixed sample rates" in w for w in r["warnings"]) for r in report)
+    hash1 = VoiceProfileManager.compute_audio_hash([str(a), str(b)])
+    assert hash1 == VoiceProfileManager.compute_audio_hash([str(b), str(a)])
+    write_wav(b, frequency=500)
+    assert hash1 != VoiceProfileManager.compute_audio_hash([str(a), str(b)])
+    b.unlink()
+    with pytest.raises(RuntimeError, match="b.wav"):
+        VoiceProfileManager.compute_audio_hash([str(a), str(b)])
+
+
+def test_conditioning_disk_cache_and_no_audio_io_per_utterance(tmp_path, monkeypatch):
+    import torch
+    paths = [tmp_path / f"voice_{i:02}.wav" for i in range(1, 7)]
+    for p in paths:
+        write_wav(p)
+    calls = []
+
+    class Model:
+        def get_conditioning_latents(self, **kwargs):
+            calls.append(kwargs)
+            return torch.ones(1, 2, 3), torch.ones(1, 4, 1)
+
+        def inference(self, **kwargs):
+            return {"wav": np.array([0.1], dtype=np.float32)}
+
+    profile = VoiceProfile("six", "Six", "xtts_v2", reference_audio_paths=[str(p) for p in reversed(paths)],
+                           conditioning_cache_path=str(tmp_path / "cache"))
+    adapter = xtts_backend.XTTSv2Adapter()
+    adapter.device = "cpu"
+    adapter.model = Model()
+    adapter.prepare_voice_profile(profile)
+    assert calls[0]["audio_path"] == [str(p.resolve()) for p in paths]
+    assert calls[0]["gpt_cond_len"] == 30
+    second = xtts_backend.XTTSv2Adapter()
+    second.device = "cpu"
+    second.model = Model()
+    second.prepare_voice_profile(profile)
+    assert len(calls) == 1
+    second._model_identity = "different-checkpoint"
+    second.prepare_voice_profile(profile)
+    assert len(calls) == 2
+    write_wav(paths[-1], frequency=600)
+    second.prepare_voice_profile(profile)
+    assert len(calls) == 3
+    monkeypatch.setattr(VoiceProfileManager, "compute_audio_hash", lambda *args: pytest.fail("audio I/O in synthesis"))
+    monkeypatch.setattr(VoiceProfileManager, "validate_reference_audio", lambda *args: pytest.fail("validation in synthesis"))
+    assert list(second.synthesize_committed("Hello", profile))
+    assert list(second.synthesize_committed("Again", profile))
 

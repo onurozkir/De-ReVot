@@ -13,7 +13,7 @@ from voice_translator.web.websocket import WebSocketConnectionManager
 
 
 def create_app(orchestrator: MeetingOrchestrator) -> FastAPI:
-    app = FastAPI(title="Realtime Voice Translator", version="0.1.0")
+    app = FastAPI(title="De-ReVot", version="0.1.0")
 
     ws_manager = WebSocketConnectionManager()
 
@@ -54,7 +54,7 @@ def create_app(orchestrator: MeetingOrchestrator) -> FastAPI:
         index_file = static_dir / "index.html"
         if index_file.exists():
             return FileResponse(index_file)
-        return {"status": "ok", "message": "Voice Translator API is running."}
+        return {"status": "ok", "message": "De-ReVot API is running."}
 
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
