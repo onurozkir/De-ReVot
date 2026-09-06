@@ -45,10 +45,10 @@ class StreamingConfig(BaseModel):
     whisper_min_avg_logprob: float = -1.20
     whisper_max_compression_ratio: float = 2.40
     commit_min_words: int = 3
-    commit_max_wait_ms: int = 1800
+    commit_max_wait_ms: int = 3500
     stable_prefix_min_count: int = 2
     enable_adaptive_sov: bool = True
-    sov_min_silence_ms: int = 200
+    sov_min_silence_ms: int = 400
     max_partial_queue_size: int = 2
     max_committed_queue_size: int = 8
     max_tts_queue_size: int = 8

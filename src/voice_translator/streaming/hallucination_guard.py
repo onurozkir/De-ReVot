@@ -5,8 +5,19 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
-from typing import Any, Mapping
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Sequence
+
+
+DEFAULT_PATTERNS = (
+    "izlediğiniz için teşekkürler", "izlediğiniz için teşekkür ederim",
+    "izlediğiniz için çok teşekkür ederim", "izlediğiniz için çok teşekkürler",
+    "bizi izlediğiniz için teşekkürler", "bizi izlediğiniz için teşekkür ederiz",
+    "abone olmayı unutmayın", "beğenmeyi unutmayın", "görüşmek üzere",
+    "abone ol", "thank you for watching", "thanks for watching", "please subscribe", "altyazı m.k.",
+    "altyazı m.k", "altyazı", "see you next time", "[music]", "[müzik]", "[applause]", "[alkış]",
+    "(laughter)", "(gülüşmeler)", "subtitle", "subtitles",
+)
 
 
 def normalize_text(text: str) -> str:
@@ -37,6 +48,7 @@ class HallucinationPolicy:
     max_compression_ratio: float = 2.40
     # Conservative, configurable plausibility ceiling, not a linguistic guarantee.
     max_chars_per_second: float = 50.0
+    patterns: Sequence[str] = field(default_factory=lambda: DEFAULT_PATTERNS)
 
 
 @dataclass(slots=True)
@@ -47,10 +59,11 @@ class GuardDecision:
 
 
 class HallucinationGuard:
-    """Acoustic evidence and confidence only; never censor a spoken phrase."""
+    """Acoustic evidence and confidence primary; known hallucination patterns as final safety net."""
 
     def __init__(self, policy: HallucinationPolicy | None = None):
         self.policy = policy or HallucinationPolicy()
+        self._patterns = {normalize_text(p) for p in self.policy.patterns}
 
     def evaluate(self, text: str, evidence: SpeechEvidence, model_info: Mapping[str, Any] | None = None) -> GuardDecision:
         normalized = normalize_text(text)
@@ -91,8 +104,17 @@ class HallucinationGuard:
         compression_ratio = info.get("compression_ratio")
         if compression_ratio is not None and float(compression_ratio) > self.policy.max_compression_ratio:
             return GuardDecision(False, "whisper_repetition", normalized)
+
+        # Final safety net: check against known hallucination patterns
+        if normalized in self._patterns or normalized.strip("[]()") in self._patterns:
+            return GuardDecision(False, "known_hallucination_pattern", normalized)
+
         words = normalized.split()
         if len(words) >= 8 and len(set(words)) / len(words) < 0.35:
             return GuardDecision(False, "repetitive_text", normalized)
         return GuardDecision(True, "accepted", normalized)
+
+    def is_known_pattern(self, text: str) -> bool:
+        normalized = normalize_text(text)
+        return normalized in self._patterns or normalized.strip("[]()") in self._patterns
 

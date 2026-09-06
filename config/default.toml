@@ -40,7 +40,7 @@ echo_delay_ms = 50
 vad_threshold = 0.5
 vad_end_threshold = 0.35
 vad_min_speech_duration_ms = 200
-vad_min_silence_duration_ms = 750
+vad_min_silence_duration_ms = 850
 vad_start_confirm_frames = 3
 vad_end_confirm_frames = 6
 vad_hangover_ms = 200
@@ -57,16 +57,16 @@ whisper_max_no_speech_prob = 0.80
 whisper_min_avg_logprob = -1.20
 whisper_max_compression_ratio = 2.40
 commit_min_words = 3
-commit_max_wait_ms = 1800
+commit_max_wait_ms = 3500
 stable_prefix_min_count = 2
 enable_adaptive_sov = true
-sov_min_silence_ms = 200
+sov_min_silence_ms = 400
 max_partial_queue_size = 2
 max_committed_queue_size = 8
 max_tts_queue_size = 8
 
 [asr]
-backend = "whisper_turbo"
+backend = "faster_whisper"
 # For full large-v3: backend = "faster_whisper", model_path = "models/asr/whisper-large-v3",
 # compute_type = "int8_float16" (CUDA) or "int8" (CPU). Download explicitly first.
 model_path = "models/asr/whisper-large-v3-turbo"
@@ -84,7 +84,7 @@ share_weights = true
 
 [translation]
 backend = "ctranslate2"
-model_type = "auto"
+model_type = "nllb"
 tr_en_model_path = "models/mt/opus-mt-tc-big-tr-en"
 en_tr_model_path = "models/mt/opus-mt-tc-big-en-tr"
 tr_fr_model_path = "models/mt/opus-mt-tr-fr"

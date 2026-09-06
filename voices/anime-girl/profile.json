@@ -1,15 +1,15 @@
 {
   "id": "anime-girl",
-  "display_name": "Anime Girl (Japanese Reference)",
+  "display_name": "Anime girl References",
   "backend": "xtts_v2",
-  "reference_audio_path": "reference.wav",
-  "reference_text": null,
-  "reference_language": "ja",
-  "target_language": "en",
-  "target_languages": ["en", "fr"],
+  "reference_audio_paths": [
+    "voice_01.wav", "voice_02.wav", "voice_03.wav",
+    "voice_04.wav", "voice_05.wav", "voice_06.wav"
+  ],
+  "reference_language": "ja", 
+  "target_languages": ["en", "fr", "tr"],
   "is_default": false,
   "metadata": {
-    "description": "Japanese anime voice reference cloned for English and French synthesis"
+    "description": "Japanese anime voice reference cloned for English, French, and Turkish synthesis"
   }
 }
-

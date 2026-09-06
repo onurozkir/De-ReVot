@@ -6,11 +6,30 @@ from voice_translator.streaming.hallucination_guard import HallucinationGuard, S
 GOOD_EVIDENCE = SpeechEvidence(utterance_ms=1800, voiced_ms=1400, voiced_ratio=0.77, max_queue_age_ms=30)
 
 
-@pytest.mark.parametrize("text", ["Teşekkür ederim", "Abone ol.", "Altyazı M.K.",
-    "İzlediğiniz için teşekkür ederim.", "Thank you for watching!", "Görüşmek üzere",
-    "Bugün altyazı hakkında konuşalım", "We need to review the deployment"])
-def test_genuine_speech_is_never_rejected_by_its_words(text):
+@pytest.mark.parametrize("text", [
+    "Teşekkür ederim",
+    "Bugün altyazı hakkında konuşalım",
+    "We need to review the deployment",
+    "Toplantıyı başlatalım",
+])
+def test_genuine_speech_is_accepted(text):
     assert HallucinationGuard().evaluate(text, GOOD_EVIDENCE, {"avg_logprob": -0.2}).accepted
+
+
+@pytest.mark.parametrize("pattern", [
+    "İzlediğiniz için teşekkür ederim.",
+    "İzlediğiniz için teşekkürler.",
+    "Altyazı M.K.",
+    "Altyazı M.K",
+    "Abone ol.",
+    "Thank you for watching!",
+    "Please subscribe",
+    "[music]",
+])
+def test_known_pattern_is_final_safety_net_for_otherwise_good_evidence(pattern):
+    decision = HallucinationGuard().evaluate(pattern, GOOD_EVIDENCE, {"avg_logprob": -0.2})
+    assert not decision.accepted
+    assert decision.reason == "known_hallucination_pattern"
 
 
 def test_turkish_dotted_i_normalization_preserves_letter_counts():
@@ -24,7 +43,7 @@ def test_silence_rejected_independently_of_words(text):
 
 
 def test_acoustically_impossible_text_is_rejected_but_genuine_duration_passes():
-    text = "İzlediğiniz için teşekkür ederim"
+    text = "Bugün toplantıda konuşulan tüm detayları baştan sona inceledik"
     short = SpeechEvidence(utterance_ms=600, voiced_ms=250, voiced_ratio=0.42)
     assert HallucinationGuard().evaluate(text, short).reason == "implausible_speech_rate"
     assert HallucinationGuard().evaluate(text, GOOD_EVIDENCE).accepted

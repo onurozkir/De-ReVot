@@ -93,10 +93,10 @@ class CommitController:
     def __init__(
         self,
         min_words: int = 3,
-        max_wait_ms: int = 1800,
+        max_wait_ms: int = 3500,
         stable_prefix_min_count: int = 2,
         enable_adaptive_sov: bool = True,
-        sov_min_silence_ms: int = 200,
+        sov_min_silence_ms: int = 400,
     ):
         self.min_words = min_words
         self.max_wait_ms = max_wait_ms

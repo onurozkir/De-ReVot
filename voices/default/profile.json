@@ -1,0 +1,15 @@
+{
+  "id": "default",
+  "display_name": "Default — Six References",
+  "backend": "xtts_v2",
+  "reference_audio_paths": [
+    "voice_01_mono.wav", "voice_02_mono.wav", "voice_03_mono.wav",
+    "voice_04_mono.wav", "voice_05_mono.wav", "voice_06_mono.wav"
+  ],
+  "reference_language": "tr", 
+  "target_languages": ["en", "fr"],
+  "is_default": false,
+  "metadata": {
+    "description": "Default personal Turkish voice reference for English and French cloned synthesis"
+  }
+}
