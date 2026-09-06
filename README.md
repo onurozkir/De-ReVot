@@ -1,25 +1,28 @@
-# Realtime Voice Translator for Meetings and Games
+# De-ReVot
+
+Speak your language. Be heard in theirs.
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![CUDA 12.x](https://img.shields.io/badge/CUDA-12.x-green.svg)](https://developer.nvidia.com/cuda-toolkit)
 [![OS: Windows 11](https://img.shields.io/badge/OS-Windows%2011%20Native-orange.svg)](https://www.microsoft.com/windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-A local, private, full-duplex voice translator for **MS Teams, Zoom, Google Meet (Chrome / Edge), Discord, Slack Huddles, VRChat, Dota 2, PUBG and CS2** on native Windows. Application presets provide setup guidance over the same VB-CABLE and WASAPI audio paths. Per-application remote-call validation remains a separate hardware gate.
+A local, private, real-time, full-duplex voice translator for **MS Teams, Zoom, Google Meet (Chrome / Edge), Discord, Slack Huddles, and Games** on native Windows. Application presets provide setup guidance over the same VB-CABLE and WASAPI audio paths. Per-application remote-call validation remains a separate hardware gate.
 
-Translate your speech live between **Turkish** and **English / French** while preserving your original identity through **cross-lingual voice cloning**.
+Translate your speech live between **Turkish**, **English** and **French** while preserving your original identity through **cross-lingual voice cloning**.
 
 ---
 
 ## Key Features
 
-- **Turkish Mic ➔ Cloned English / French Speech (Outgoing)**: Speak into your physical microphone; translated cloned speech reaches the target application's microphone through VB-CABLE.
-- **English Audio ➔ Live Turkish Subtitles (Incoming)**: Speaker loopback feeds subtitles to both the primary WhisperLiveKit Web UI and an automatic floating desktop HUD.
+- **Any supported source ➔ any supported target (Outgoing)**: Speak Turkish, English or French into your physical microphone; cloned speech in the selected meeting language (Turkish, English or French) reaches the target application's microphone through VB-CABLE.
+- **Meeting audio ➔ live subtitles in your language (Incoming)**: Speaker loopback feeds subtitles in your selected display language to both the primary WhisperLiveKit Web UI and an automatic floating desktop HUD.
 - **Hands-free or Push-to-Talk**: Start Meeting starts both directions, including games. PTT gates only your microphone; incoming subtitles stay active. Default global keys: `V` to talk, `F9` to switch mode, `Ctrl+Shift+T` to pause/resume both directions, `Ctrl+Shift+M` for outgoing emergency mute.
-- **Zero-Shot Voice Cloning (XTTS-v2)**: Clone any voice from a clean 6–10 second reference `.wav` file. The cloned voice seamlessly speaks English and French with accurate prosody and natural intonation.
+- **Multi-reference voice cloning (XTTS-v2)**: Use six clean 8–10 second WAVs or an existing single reference. Validated, cached speaker conditioning supports every target language in XTTS-v2's synthesis matrix; identity and prosody require listening evaluation. See the [voice recording guide](docs/voice-recording-guide.md).
+- **Microphone noise reduction and echo cancellation**: Offline WebRTC processing runs before VAD/ASR. Speaker loopback supplies a separate bounded echo reference, including while incoming subtitles are paused.
 - **Live Mid-Meeting Switching**:
   - Switch voice profiles during a session; uncached conditioning must complete before the new profile is used.
-  - Switch target language (e.g. **Turkish ➔ English** to **Turkish ➔ French**) on-the-fly without restarting or interrupting audio streams.
+  - Switch source and target languages on-the-fly (e.g. **Turkish ➔ English** to **English ➔ French**, or **French ➔ Turkish**) without restarting or interrupting audio streams.
 - **Local inference**: ASR and TTS use the GPU; default MT uses CPU INT8. No cloud translation service or recurring API subscription is required.
 - **Hardware-Aware Diagnostics**: Real-time dBFS audio meters for physical mic, WASAPI loopback, and VB-CABLE virtual render, along with P50/P95 end-to-end latency telemetry and VRAM monitoring.
 
@@ -46,16 +49,16 @@ Translate your speech live between **Turkish** and **English / French** while pr
 ```
 [ Physical Mic ] ──> [ VAD / PTT ] ──> [ Whisper ASR ] ──> [ CTranslate2 MT ] ──> [ XTTS-v2 Voice Cloning ] ──> [ VB-CABLE Input ] ──> [ App Mic ]
                                               │                         │                               │
-                                      (Turkish Speech)          (English/French Text)           (Cloned Speech PCM)
+                                      (Chosen source language)  (Chosen target language text)     (Cloned speech PCM)
 
 [ App Speaker ] ──> [ WASAPI Loopback ] ──> [ Whisper ASR ] ──> [ CTranslate2 MT ] ──> [ Web UI + Desktop HUD ]
                                                     │                         │
-                                            (Incoming Audio)          (Turkish Subtitles)
+                                            (Incoming audio)          (Chosen subtitle language)
 ```
 
-- **VAD**: Silero VAD with speech envelope hysteresis and adaptive hangover to preserve natural Turkish SOV sentence structures.
+- **VAD**: Silero VAD with speech envelope hysteresis and adaptive hangover preserving natural Turkish SOV sentence structure when the source language is Turkish.
 - **ASR**: `openai/whisper-large-v3-turbo` or `Systran/faster-whisper-large-v3`, with acoustic evidence filtering and no phrase blacklist.
-- **MT**: Helsinki-NLP `opus-mt-tc-big-tr-en`, `opus-mt-tc-big-en-tr`, and `opus-mt-tr-fr` with CTranslate2 INT8 / HuggingFace MarianMT execution.
+- **MT**: Helsinki-NLP OPUS-MT TC-Big pairs (`tr-en`, `en-tr`, `tr-fr`) with CTranslate2 INT8 / HuggingFace MarianMT execution; NLLB-200 covers every other pair between enabled languages.
 - **TTS**: Coqui XTTS-v2 with persistent speaker latent caching.
 
 ---
@@ -117,6 +120,14 @@ python scripts/download_models.py mt-tr-fr --convert-ct2
 python scripts/download_models.py mt-nllb-200 --convert-ct2
 ```
 
+For a language enabled in `config/default.toml`, download every pinned pair
+involving it with `--lang` (pairs without a pinned OPUS model fall back to
+NLLB-200):
+
+```powershell
+python scripts/download_models.py --lang fr
+```
+
 ---
 
 ## Translation Engine: OPUS-MT vs. NLLB-200
@@ -154,9 +165,9 @@ Edit `config/default.toml` (or create an override in `config/local.toml`):
 ```toml
 [translation]
 # Options:
-#   "auto" : Automatically selects the low-latency OPUS-MT INT8 model (default)
-#   "opus" : Explicitly enforce OPUS-MT
-#   "nllb" : Enforce Meta NLLB-200 Distilled 600M
+#   "auto" : Load installed OPUS pairs and NLLB-200; route per language pair (default)
+#   "opus" : Explicitly enforce OPUS-MT pairs only
+#   "nllb" : Enforce Meta NLLB-200 Distilled 600M only
 model_type = "auto"   # change to "nllb" to activate NLLB-200
 ```
 
@@ -366,26 +377,71 @@ python src/voice_translator/main.py run --mock
 
 ## Adding Custom Voice Profiles
 
-You can add as many custom voice avatars as you like (e.g., personal cheerful voice, anime character, professional tone):
+1. Create `voices/onur-six/` and record six clean WAVs with the same microphone,
+   speaker and room. Aim for 8–10 seconds each, without aggressive audio filters.
+2. Name them `voice_01.wav` through `voice_06.wav`. A manifest is optional; WAVs
+   directly inside the directory are discovered in sorted order.
+3. Validate offline: `uv run python scripts/validate_voice_profile.py onur-six`.
+4. Restart, select **onur-six (6 WAV, xtts_v2)**, then Start Meeting. Preparation
+   happens before the voice is used; cached latents are reused during synthesis.
 
-1. Create a new folder under `voices/<profile_name>/`.
-2. Place a clean 6–10 second `.wav` audio recording inside the folder named `reference.wav` (16-bit PCM, 24kHz or 16kHz recommended).
-3. Add a `profile.json` manifest:
-   ```json
-   {
-     "id": "anime-girl",
-     "display_name": "Anime Character",
-     "backend": "xtts_v2",
-     "reference_audio_path": "reference.wav",
-     "reference_language": "ja",
-     "target_languages": ["en", "fr"],
-     "is_default": false,
-     "metadata": {
-       "description": "Japanese anime voice cloned for real-time English and French synthesis"
-     }
-   }
-   ```
-4. Restart the server. The profile will appear in the web dashboard and can be switched live mid-meeting!
+```text
+voices/onur-six/
+├── profile.json       # optional name, languages, explicit file list
+├── voice_01.wav
+├── voice_02.wav
+├── voice_03.wav
+├── voice_04.wav
+├── voice_05.wav
+├── voice_06.wav
+└── cache/             # generated conditioning cache
+```
+
+Existing manifests with `"reference_audio_path": "reference.wav"` remain valid.
+Explicit multi-file manifests use `reference_audio_paths`; missing files fail
+instead of silently reducing the dataset. `/api/profiles` includes
+`reference_audio_paths`, `reference_count` and manifest errors.
+
+See the [recording guide](docs/voice-recording-guide.md) for the full manifest,
+six Turkish reading scripts, validation thresholds, cache lifecycle and XTTS's
+30-second GPT conditioning window. This workflow is conditioning, not fine-tuning.
+
+## Background noise and speaker echo
+
+Run `uv sync` once after updating to install the pinned native Windows dependency
+[`aec-audio-processing==1.0.1`](https://pypi.org/project/aec-audio-processing/)
+(BSD-3-Clause; WebRTC AudioProcessing, not a claim of AEC3). No new model weights
+or GPU memory are required. Both controls are enabled by default and available in
+**Audio & Devices** for the next session. With headphones, echo cancellation can
+be disabled while keeping noise reduction enabled.
+
+Persistent settings in `config/local.toml`:
+
+```toml
+[audio]
+noise_suppression = true
+echo_cancellation = true
+noise_suppression_level = 2 # 0 low, 1 moderate, 2 high, 3 very high
+echo_delay_ms = 50         # estimated loopback-to-mic delay; calibrate per device
+```
+
+Select the loopback matching your physical speaker. The diagnostics panel reports
+missing echo reference or DSP errors; failures mute outgoing delivery visibly.
+Noise reduction can reduce steady traffic/engine noise, but transient vehicle
+sounds and Whisper hallucinations still need real recordings for verification.
+No spoken-word blacklist is used. AEC preserves simultaneous microphone speech
+instead of muting the mic whenever someone else speaks. Headphones remain the
+most reliable way to avoid speaker bleed.
+
+Offline benchmark (no device recording):
+
+```powershell
+uv run python scripts/benchmark_audio_processing.py --speech voices/onur-default/reference.wav --output benchmarks/audio/results/processing.json
+```
+
+Synthetic noise/echo tests measure processing time and attenuation. Real outdoor
+speech quality, end-to-end queue age and 30-minute full-duplex soak remain separate
+gates; see [Plan.md](Plan.md) §8.4 for measured results and limits.
 
 ---
 
