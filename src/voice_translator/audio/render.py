@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import time
 from typing import Optional
 import numpy as np
@@ -116,6 +117,12 @@ class AudioRenderEngine:
         if self.muted or len(pcm_data) == 0:
             return
 
+        pcm_data = self._convert_pcm(pcm_data, source_rate)
+        self.signal_meter.observe(pcm_data)
+        self.ring_buffer.write(pcm_data)
+        self.last_write_ns = time.monotonic_ns()
+
+    def _convert_pcm(self, pcm_data: np.ndarray, source_rate: Optional[int]) -> np.ndarray:
         if source_rate is not None and source_rate != self.sample_rate:
             resampler = self._resamplers.get(source_rate)
             if resampler is None:
@@ -126,10 +133,39 @@ class AudioRenderEngine:
                 self._resamplers[source_rate] = resampler
             pcm_data = resampler.process(pcm_data)
 
-        pcm_data = downmix_to_mono(pcm_data)
-        self.signal_meter.observe(pcm_data)
-        self.ring_buffer.write(pcm_data)
-        self.last_write_ns = time.monotonic_ns()
+        return downmix_to_mono(pcm_data)
+
+    async def enqueue_pcm(self, pcm_data: np.ndarray, source_rate: int, *, cancelled,
+                          final: bool = False):
+        """Yield written sample counts with backpressure outside the callback.
+
+        One TTS worker owns writes. Long synthesized waveforms and resampler
+        tails must not overwrite committed PCM in the fixed-capacity ring.
+        """
+        if not self.is_running or self.muted or cancelled():
+            return
+        pcm = self._convert_pcm(pcm_data, source_rate)
+        if final and source_rate in self._resamplers:
+            pcm = np.concatenate((pcm, self._resamplers[source_rate].flush()))
+        offset = 0
+        last_progress = time.monotonic()
+        while offset < len(pcm):
+            if not self.is_running or self.muted or cancelled():
+                return
+            count = min(len(pcm) - offset, self.ring_buffer.available_write, self.frame_size)
+            if not count:
+                if time.monotonic() - last_progress > 2.0:
+                    self.last_error = "Audio output stalled for 2 seconds"
+                    raise AudioDeviceError(self.last_error)
+                await asyncio.sleep(.005)
+                continue
+            part = pcm[offset:offset + count]
+            self.signal_meter.observe(part)
+            self.ring_buffer.write(part)
+            self.last_write_ns = time.monotonic_ns()
+            offset += count
+            last_progress = time.monotonic()
+            yield count
 
     def flush_source(self, source_rate: int) -> None:
         if self.muted:

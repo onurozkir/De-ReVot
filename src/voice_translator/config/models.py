@@ -113,7 +113,9 @@ class TranslationConfig(BaseModel):
     device: str = "cpu"
     compute_type: str = "int8"
     beam_size: int = 2
-    enable_context_priming: bool = True
+    # Legacy configuration accepted for compatibility. OPUS/NLLB translate the
+    # complete current turn; they cannot align and remove prepended history.
+    enable_context_priming: bool = False
     glossary: dict[str, str] = Field(default_factory=dict)
 
 

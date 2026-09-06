@@ -355,6 +355,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const outgoing = data.outgoing;
       const incoming = data.incoming;
       const processing = outgoing?.processing;
+      const pttStatus = document.getElementById("pttStatus");
+      if (outgoing?.input_mode === "ptt" && outgoing.ptt_pressed) {
+        pttStatus.textContent = outgoing.ptt_cancelled
+          ? "Recording cancelled. Release and hold again to retry."
+          : `Recording ${(outgoing.ptt_recorded_ms / 1000).toFixed(1)} s — release to translate.`;
+      }
       document.getElementById("audioProcessingStatus").textContent = processing?.last_error
         ? `Microphone processing failed; outgoing muted: ${processing.last_error}`
         : processing
@@ -427,6 +433,29 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         break;
 
+      case "asr_rejected":
+        if (data.direction === "outgoing") {
+          const messages = {
+            ptt_duration_exceeded: "Recording exceeded 30 seconds and was cancelled. Release and try a shorter turn.",
+            insufficient_ptt_speech: "Not enough clear speech detected. Check your microphone and try again.",
+            stale_audio: "Audio was lost while processing. Release and repeat the turn.",
+          };
+          document.getElementById("pttStatus").textContent = messages[data.reason] ||
+            "Speech could not be recognized reliably. Please try again.";
+        }
+        break;
+
+      case "audio_render_error":
+        document.getElementById("pttStatus").textContent = `Audio output failed; outgoing muted: ${data.error}`;
+        break;
+
+      case "asr_committed":
+        if (data.direction === "outgoing") {
+          document.getElementById("pttStatus").textContent = "Translating your recorded turn…";
+          outgoingPartial.textContent = `Recognized: ${data.text}`;
+        }
+        break;
+
       case "mt_committed":
         if (data.direction === "outgoing") {
           outgoingPartial.textContent = `Synthesizing: ${data.translated_text}`;
@@ -434,6 +463,7 @@ document.addEventListener("DOMContentLoaded", () => {
         break;
 
       case "tts_started":
+        document.getElementById("pttStatus").textContent = "";
         outgoingPartial.textContent = "Listening...";
         addUtterance(outgoingBox, data.source_text,
           `🔊 [${(data.target_language || currentTarget).toUpperCase()} Routed] ${data.translated_text}`, false);

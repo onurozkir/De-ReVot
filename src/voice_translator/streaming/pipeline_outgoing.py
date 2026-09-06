@@ -21,7 +21,9 @@ from voice_translator.config.languages import asr_prompt, defaults as language_d
 from voice_translator.config.models import AppConfig
 from voice_translator.config.presets import resolve_input_mode
 from voice_translator.streaming.input_control import InputGate
+from voice_translator.streaming.hallucination_guard import SpeechEvidence
 from voice_translator.core.bounded_queue import BoundedQueue
+from voice_translator.core.errors import AudioDeviceError
 from voice_translator.core.types import Direction, LatencyEvent, TranslationEvent, UtteranceEvent, UtteranceState
 from voice_translator.streaming.commit_policy import CommitController
 from voice_translator.streaming.pipeline_runtime import (
@@ -112,6 +114,11 @@ class OutgoingPipeline:
         self._routing_muted = False
         self._delivery_generation = 0
         self._audio_inflight: Optional[asyncio.Task] = None
+        self._ptt_active = False
+        self._ptt_cancelled = False
+        self._ptt_input_samples = 0
+        self._ptt_voiced_ms = 0.0
+        self._ptt_start_ns: int | None = None
 
     async def start(self) -> None:
         if self.is_running:
@@ -170,15 +177,38 @@ class OutgoingPipeline:
                 if discard:
                     self.capture_engine.read_samples(discard)
                     self._dropped_audio_samples += discard
-                    self._reject_current("stale_audio", self.asr_session.last_partial_text if self.asr_session else "")
-                    self.vad.reset()
-                    self._in_speech = False
-                    self._preroll.clear()
+                    latest_ns = self.capture_engine.last_callback_ns or time.monotonic_ns()
+                    lost_end_ns = latest_ns - round((available - discard) * 1e9 / self.capture_engine.sample_rate)
+                    self._discard_stale_input(lost_end_ns)
                 queue_age_ms = frame_size / self.capture_engine.sample_rate * 1000.0
             frame = self.capture_engine.read_samples(min(frame_size, available))
             latest_capture_ns = self.capture_engine.last_callback_ns or time.monotonic_ns()
             captured_at_ns = latest_capture_ns - int(queue_age_ms * 1e6) + round(len(frame) * 1e9 / self.capture_engine.sample_rate)
             await self._run_audio_work(frame, captured_at_ns, queue_age_ms)
+
+    def _discard_stale_input(self, lost_end_ns: int) -> None:
+        # Final decoding can take longer than the audio queue budget. Closed-gate
+        # audio needs no warning; a new press inside the lost interval must be
+        # cancelled rather than replayed later as an apparently complete turn.
+        lost_speech = self._ptt_active or self.input_gate.mode == "vad"
+        actions = self.input_gate.discard_until(lost_end_ns)
+        lost_speech |= any(a.kind == "ptt_press" for a in actions)
+        lost_speech |= self.input_gate.mode == "vad"
+        self._reset_ptt()
+        reset_asr_utterance(self.asr_session)
+        self.commit_controller.reset()
+        self.vad.reset()
+        self._in_speech = False
+        self._preroll.clear()
+        self._current_max_queue_age_ms = 0.0
+        self._ptt_active = self.input_gate.mode == "ptt" and self.input_gate.pressed
+        self._ptt_cancelled = self._ptt_active
+        if lost_speech:
+            self._note_rejection("stale_audio", "")
+        if any(a.kind == "control_overload" for a in actions):
+            self.set_routing_muted(True)
+            self._overloaded = True
+            self._note_rejection("control_overload", "")
 
     async def _run_audio_work(self, frame, captured_at_ns, queue_age_ms) -> None:
         self._audio_inflight = asyncio.create_task(asyncio.to_thread(
@@ -206,11 +236,24 @@ class OutgoingPipeline:
             if not self.is_running:
                 break
             if action.kind == "audio":
-                self._process_audio_frame(action.audio, action.at_ns, queue_age_ms)
+                if action.input_mode == "ptt":
+                    self._buffer_ptt_frame(action.audio, action.at_ns, queue_age_ms)
+                else:
+                    self._process_audio_frame(action.audio, action.at_ns, queue_age_ms)
+            elif action.kind == "ptt_press":
+                self._reset_ptt()
+                reset_asr_utterance(self.asr_session)
+                self.commit_controller.reset()
+                self.vad.reset()
+                self._preroll.clear()
+                self._current_max_queue_age_ms = 0.0
+                self._in_speech = False
+                self._ptt_active = True
             elif action.kind == "ptt_release":
-                self._flush_endpoint(action.at_ns, "ptt_release")
+                self._finish_ptt(action.at_ns)
             else:
                 self._reject_current(action.kind, "")
+                self._reset_ptt()
                 self.vad.reset()
                 self._in_speech = False
                 self._preroll.clear()
@@ -219,12 +262,92 @@ class OutgoingPipeline:
                     self.set_routing_muted(True)
                     self._overloaded = True
 
+    def _reset_ptt(self) -> None:
+        self._ptt_active = False
+        self._ptt_cancelled = False
+        self._ptt_input_samples = 0
+        self._ptt_voiced_ms = 0.0
+        self._ptt_start_ns = None
+        self.resampler_in.flush()  # Discard cancelled audio; isolate consecutive holds.
+
+    def _buffer_ptt_frame(self, audio: np.ndarray, at_ns: int, queue_age_ms: float) -> None:
+        if not self._ptt_active or self._ptt_cancelled or self.asr_session is None:
+            return
+        if self._routing_muted:
+            self._reject_current("routing_muted", "")
+            return
+        self._ptt_input_samples += len(audio)
+        if self._ptt_input_samples > 30 * self.config.audio.sample_rate:
+            self._reject_current("ptt_duration_exceeded", "")
+            return
+        if self._ptt_start_ns is None:
+            self._ptt_start_ns = at_ns - round(len(audio) * 1e9 / self.config.audio.sample_rate)
+        self._current_max_queue_age_ms = max(self._current_max_queue_age_ms, queue_age_ms)
+        self._append_ptt_audio(self.resampler_in.process(audio), at_ns)
+
+    def _append_ptt_audio(self, audio: np.ndarray, at_ns: int) -> None:
+        if not len(audio):
+            return
+        self._last_vad_result = self.vad.process(audio)
+        # VAD classifies speech but never cuts a held recording. Sum evidence
+        # across pauses instead of using only the final VAD segment's counters.
+        if self._last_vad_result.probability >= self.vad.threshold:
+            self._ptt_voiced_ms += len(audio) / 16.0
+        try:
+            self.asr_adapter.buffer_audio(self.asr_session, audio, at_ns)
+        except ValueError as exc:
+            self._reject_current(str(exc), "")
+
+    def _finish_ptt(self, at_ns: int) -> None:
+        if not self._ptt_active or self.asr_session is None:
+            return
+        try:
+            if self._ptt_cancelled:
+                return
+            self._append_ptt_audio(self.resampler_in.flush(), at_ns)
+            if self._ptt_cancelled:
+                return
+            duration_ms = self.asr_session.total_audio_samples / 16.0
+            evidence = SpeechEvidence(duration_ms, self._ptt_voiced_ms,
+                                      self._ptt_voiced_ms / max(duration_ms, 1.0),
+                                      self._current_max_queue_age_ms)
+            policy = self.guard.policy
+            if (duration_ms < policy.min_utterance_ms or self._ptt_voiced_ms < policy.min_voiced_ms
+                    or evidence.voiced_ratio < policy.min_voiced_ratio):
+                self._reject_current("insufficient_ptt_speech", "")
+                return
+            # Resampling may delay PCM. Retain capture/key timestamps, not the
+            # decoder's completion time or the last resampler output boundary.
+            self.asr_session.metadata["capture_start_ns"] = self._ptt_start_ns
+            self.asr_session.metadata["capture_end_ns"] = at_ns
+            final = self.asr_adapter.flush_session(self.asr_session)
+            if self._ptt_cancelled:
+                return
+            if final is not None and final.text.strip():
+                self._handle_commit(final.text, final.audio_start_ns, final.audio_end_ns,
+                                    {**final.model_info, "commit_reason": "ptt_release"},
+                                    evidence=evidence)
+            else:
+                self._reject_current("no_asr_text", "")
+        finally:
+            reset_asr_utterance(self.asr_session)
+            self.commit_controller.reset()
+            self.vad.reset()
+            self._preroll.clear()
+            self._in_speech = False
+            self._current_max_queue_age_ms = 0.0
+            self._reset_ptt()
+            self._emit_event({"type": "input_endpoint", "direction": "outgoing", "reason": "ptt_release",
+                              "audio_end_ns": at_ns, "timestamp_ns": time.monotonic_ns()})
+
     def request_input(self, kind: str, value, at_ns: int | None = None) -> None:
         self.input_gate.change(kind, value, at_ns)
 
     def set_routing_muted(self, muted: bool) -> None:
         if muted and not self._routing_muted:
             self._delivery_generation += 1
+            if self._ptt_active:
+                self._ptt_cancelled = True
         self._routing_muted = muted
         if self.render_engine is not None:
             self.render_engine.set_muted(muted)
@@ -324,11 +447,12 @@ class OutgoingPipeline:
         model_info: dict,
         *,
         remaining_partial_text: str = "",
+        evidence: SpeechEvidence | None = None,
     ) -> bool:
         if self._routing_muted:
             self._reject_current("routing_muted", text)
             return False
-        evidence = speech_evidence(self._last_vad_result, self._current_max_queue_age_ms)
+        evidence = evidence or speech_evidence(self._last_vad_result, self._current_max_queue_age_ms)
         decision = self.guard.evaluate(text, evidence, model_info)
         if not decision.accepted:
             self._reject_current(decision.reason, text)
@@ -362,6 +486,8 @@ class OutgoingPipeline:
         return True
 
     def _reject_current(self, reason: str, text: str) -> None:
+        if self._ptt_active:
+            self._ptt_cancelled = True  # Never translate just the tail after data loss.
         self._note_rejection(reason, text)
         reset_asr_utterance(self.asr_session)
         self.commit_controller.reset()
@@ -449,18 +575,24 @@ class OutgoingPipeline:
                     self._record_latency(event, "tts_first_pcm", now_ns, (now_ns - t0) / 1e6)
                 if self.render_engine is not None:
                     source_rate = int(getattr(self.tts_adapter, "sample_rate", self.config.tts.sample_rate))
-                    self.render_engine.push_pcm(pcm, source_rate=source_rate)
-                    if not pcm_routed:
-                        self._emit_event({
-                            "type": "tts_started", "direction": "outgoing",
-                            "source_text": event.source_text,
-                            "translated_text": event.translated_text,
-                            "sequence_id": event.sequence_id,
-                            "timestamp_ns": now_ns,
-                            "source_language": self.source_language, "target_language": self.target_language,
-                        })
-                        # Event means first PCM reached bounded render path, once.
-                        pcm_routed = True
+                    try:
+                        async for _ in self.render_engine.enqueue_pcm(
+                            pcm, source_rate, cancelled=lambda: not self.is_running or self._delivery_cancelled(event),
+                        ):
+                            if not pcm_routed:
+                                self._emit_event({
+                                    "type": "tts_started", "direction": "outgoing",
+                                    "source_text": event.source_text,
+                                    "translated_text": event.translated_text,
+                                    "sequence_id": event.sequence_id,
+                                    "timestamp_ns": time.monotonic_ns(),
+                                    "source_language": self.source_language, "target_language": self.target_language,
+                                })
+                                pcm_routed = True
+                    except AudioDeviceError as exc:
+                        self.set_routing_muted(True)
+                        self._emit_event({"type": "audio_render_error", "direction": "outgoing", "error": str(exc)})
+                        break
             if not pcm_routed:
                 self._emit_event({
                     "type": "tts_rejected", "direction": "outgoing",
@@ -469,7 +601,15 @@ class OutgoingPipeline:
                 })
             if self.render_engine is not None and not self._delivery_cancelled(event):
                 source_rate = int(getattr(self.tts_adapter, "sample_rate", self.config.tts.sample_rate))
-                self.render_engine.flush_source(source_rate)
+                try:
+                    async for _ in self.render_engine.enqueue_pcm(
+                        np.empty(0, np.float32), source_rate, final=True,
+                        cancelled=lambda: not self.is_running or self._delivery_cancelled(event),
+                    ):
+                        pass
+                except AudioDeviceError as exc:
+                    self.set_routing_muted(True)
+                    self._emit_event({"type": "audio_render_error", "direction": "outgoing", "error": str(exc)})
 
     def _delivery_cancelled(self, event) -> bool:
         cancelled = self._routing_muted or event.model_info.get("delivery_generation", 0) != self._delivery_generation
@@ -491,6 +631,8 @@ class OutgoingPipeline:
         return {
             "direction": "outgoing", "asr_state": vad["phase"], "vad": vad,
             "input_mode": self.input_gate.mode, "ptt_pressed": self.input_gate.pressed,
+            "ptt_recorded_ms": self._ptt_input_samples / self.config.audio.sample_rate * 1000,
+            "ptt_max_duration_ms": 30000, "ptt_cancelled": self._ptt_cancelled,
             "routing_muted": self._routing_muted,
             "processing": self.microphone_processor.snapshot() if self.microphone_processor else None,
             "last_rejection": self._last_rejection, "overloaded": self._overloaded,
@@ -542,6 +684,8 @@ class OutgoingPipeline:
             return
         self.source_language = code
         if self.asr_session is not None:
+            if self._ptt_active:
+                self._ptt_cancelled = True
             self.asr_session.language = code
             self.asr_session.initial_prompt = asr_prompt(
                 self.config, code, getattr(self.config.asr, "initial_prompt", ""))

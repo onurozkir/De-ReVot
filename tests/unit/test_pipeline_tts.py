@@ -23,6 +23,15 @@ class FakeRender:
     def flush_source(self, source_rate):
         self.flushes.append(source_rate)
 
+    async def enqueue_pcm(self, pcm, source_rate, *, cancelled, final=False):
+        if cancelled():
+            return
+        if final:
+            self.flush_source(source_rate)
+        elif len(pcm):
+            self.push_pcm(pcm, source_rate)
+            yield len(pcm)
+
 
 @pytest.mark.parametrize("translation", ["Hello", "Thank you for watching", "Please subscribe"])
 def test_outgoing_history_event_is_emitted_once_after_first_pcm_is_routed(translation):

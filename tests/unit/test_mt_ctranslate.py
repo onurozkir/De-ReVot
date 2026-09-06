@@ -34,6 +34,37 @@ def test_apply_glossary_boundary_matching():
     assert out_sub == "This article is smart."
 
 
+def test_nllb_preserves_complete_turn_without_translating_previous_turn():
+    received = {}
+
+    class Tokenizer:
+        eos_token = "</s>"
+
+        def tokenize(self, text):
+            received["text"] = text
+            return text.split()
+
+        def convert_tokens_to_ids(self, tokens):
+            return [1]
+
+        def decode(self, tokens, **kwargs):
+            return "First sentence. Second sentence. Final sentence."
+
+    class Translator:
+        def translate_batch(self, batch, **kwargs):
+            received.update(kwargs)
+            return [SimpleNamespace(hypotheses=[["translated"]])]
+
+    adapter = CTranslate2MTAdapter()
+    adapter.unified_backend = "ctranslate2"
+    adapter.unified_tokenizer = Tokenizer()
+    adapter.unified_translator = Translator()
+    source = "Birinci cümle. İkinci cümle. Son cümle."
+    result = adapter.translate(source, "tr", "en", context="Önceki konuşma.")
+    assert result == "First sentence. Second sentence. Final sentence."
+    assert received["text"] == source
+
+
 def test_resolve_model_dir_prefers_ct2_when_available(tmp_path):
     base_dir = tmp_path / "opus-mt-tr-en"
     base_dir.mkdir()

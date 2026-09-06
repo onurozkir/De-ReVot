@@ -1,4 +1,48 @@
 import numpy as np
+import asyncio
+
+from voice_translator.audio.devices import DeviceInfo
+from voice_translator.audio.render import AudioRenderEngine
+from voice_translator.audio.resampler import AudioResampler
+
+
+def test_long_render_preserves_all_pcm_with_bounded_ring_and_resampler_tail():
+    async def run():
+        device = DeviceInfo(1, "Fake", 1, "Windows WASAPI", 0, 2, 48000, False)
+        render = AudioRenderEngine(device, ring_buffer_sec=.1)
+        render.is_running = True  # No real device or callback is opened.
+        source = np.linspace(-.2, .2, 24000 * 15, dtype=np.float32)
+        output = []
+        done = False
+
+        async def consume():
+            while not done or render.ring_buffer.available_read:
+                if render.ring_buffer.available_read:
+                    output.append(render.ring_buffer.read(4800))
+                await asyncio.sleep(0)
+
+        consumer = asyncio.create_task(consume())
+        async for _ in render.enqueue_pcm(source, 24000, cancelled=lambda: False):
+            assert render.ring_buffer.available_read <= render.ring_buffer.capacity
+        async for _ in render.enqueue_pcm(np.empty(0, np.float32), 24000, cancelled=lambda: False, final=True):
+            pass
+        done = True
+        await consumer
+        np.testing.assert_allclose(np.concatenate(output), AudioResampler(24000, 48000).process(source), atol=2e-5)
+        assert render.ring_buffer.overrun_count == 0
+    asyncio.run(run())
+
+
+def test_blocked_render_can_be_muted_without_delivering_remaining_pcm():
+    async def run():
+        device = DeviceInfo(1, "Fake", 1, "Windows WASAPI", 0, 2, 48000, False)
+        render = AudioRenderEngine(device, ring_buffer_sec=.02)
+        render.is_running = True
+        async for _ in render.enqueue_pcm(np.ones(48000, np.float32), 48000, cancelled=lambda: False):
+            render.set_muted(True)
+        assert render.ring_buffer.available_read == 0
+        assert render.ring_buffer.overrun_count == 0
+    asyncio.run(run())
 
 from voice_translator.audio.signal import downmix_to_mono, pcm_to_float32, signal_levels
 from voice_translator.audio.diagnostic import dominant_frequency, frame_level_summary

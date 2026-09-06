@@ -337,7 +337,8 @@ class WhisperASRAdapter(ASRAdapter):
         except Exception as e:
             raise WarmupError(f"Whisper warmup failed: {e}") from e
 
-    def _transcribe_transformers(self, audio_16k: np.ndarray, language: str, prompt: str = "") -> tuple[str, dict[str, float]]:
+    def _transcribe_transformers(self, audio_16k: np.ndarray, language: str, prompt: str = "",
+                                *, is_final: bool = False) -> tuple[str, dict[str, float]]:
         if self.model is None or self.processor is None:
             return "", {}
 
@@ -363,9 +364,10 @@ class WhisperASRAdapter(ASRAdapter):
         with torch.inference_mode():
             # Whisper's nested Transformers 5.x generate() restores a legacy
             # max_length even when a copied config uses max_new_tokens. Use one
-            # bounded total length owner (4 prompt tokens + up to 64 text tokens).
+            # bounded total length owner. A released turn needs the full decoder
+            # window; 64 text tokens silently truncate multi-sentence recordings.
             generation_config = copy.deepcopy(self.model.generation_config)
-            generation_config.max_length = 68
+            generation_config.max_length = 448 if is_final else 68
             generation_config.max_new_tokens = None
             generation_config.forced_decoder_ids = None
             generation_config.language = language
@@ -565,7 +567,7 @@ class WhisperASRAdapter(ASRAdapter):
                     model_info["language_probability"] = float(info.language_probability)
                 return text, model_info
 
-            text, transformer_info = self._transcribe_transformers(audio_16k, language, prompt=prompt)
+            text, transformer_info = self._transcribe_transformers(audio_16k, language, prompt=prompt, is_final=is_final)
             model_info.update(transformer_info)
             return text, model_info
 

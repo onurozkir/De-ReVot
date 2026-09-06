@@ -250,13 +250,13 @@ class CTranslate2MTAdapter(MTAdapter):
             with torch.inference_mode():
                 translated_tokens = translator.generate(
                     **inputs,
-                    max_length=128,
+                    max_length=128 if is_partial else 512,
                     num_beams=beam_size,
                 )
         else:
             translated_tokens = translator.generate(
                 **inputs,
-                max_length=128,
+                max_length=128 if is_partial else 512,
                 num_beams=beam_size,
             )
 
@@ -280,7 +280,10 @@ class CTranslate2MTAdapter(MTAdapter):
         tgt_code = NLLB_FLORES.get(target_lang, target_lang)
         beam_size = 1 if is_partial else self.beam_size
 
-        input_text = f"{context} {text}" if context and not is_partial else text
+        # NLLB has no separate discourse-context channel or output alignment.
+        # Prepending a previous turn and keeping the last sentence deletes real
+        # sentences from this turn. Translate the complete current turn only.
+        input_text = text
 
         if self.unified_backend == "ctranslate2":
             tokenizer.src_lang = src_code
@@ -295,14 +298,10 @@ class CTranslate2MTAdapter(MTAdapter):
                 [tokens],
                 target_prefix=[[tgt_code]],
                 beam_size=beam_size,
-                max_decoding_length=128,
+                max_decoding_length=128 if is_partial else 512,
             )
             out_tokens = results[0].hypotheses[0]
             out_text = tokenizer.decode(tokenizer.convert_tokens_to_ids(out_tokens), skip_special_tokens=True)
-            if context and not is_partial and "." in out_text:
-                parts = [p.strip() for p in out_text.split(".") if p.strip()]
-                if len(parts) >= 2:
-                    out_text = parts[-1]
             return out_text.strip()
 
         tokenizer.src_lang = src_code
@@ -316,14 +315,14 @@ class CTranslate2MTAdapter(MTAdapter):
                 translated_tokens = translator.generate(
                     **inputs,
                     forced_bos_token_id=forced_bos_token_id,
-                    max_length=128,
+                    max_length=128 if is_partial else 512,
                     num_beams=beam_size,
                 )
         else:
             translated_tokens = translator.generate(
                 **inputs,
                 forced_bos_token_id=forced_bos_token_id,
-                max_length=128,
+                max_length=128 if is_partial else 512,
                 num_beams=beam_size,
             )
 

@@ -13,6 +13,7 @@ class GateAction:
     kind: str
     at_ns: int
     audio: np.ndarray | None = None
+    input_mode: str = "vad"
 
 
 class InputGate:
@@ -68,8 +69,10 @@ class InputGate:
                 if bool(value) == self.pressed:
                     continue
                 if self.mode == "ptt" and not self.paused and not self.muted:
-                    if value and len(self._preroll):
-                        actions.append(GateAction("audio", max(start_ns, at_ns), self._preroll))
+                    if value:
+                        actions.append(GateAction("ptt_press", at_ns))
+                        if len(self._preroll):
+                            actions.append(GateAction("audio", max(start_ns, at_ns), self._preroll, "ptt"))
                     elif not value:
                         actions.append(GateAction("ptt_release", at_ns))
                 self.pressed = bool(value)
@@ -90,6 +93,12 @@ class InputGate:
         if self.paused or self.muted:
             return
         if self.mode == "vad" or self.pressed:
-            actions.append(GateAction("audio", end_ns, audio))
+            actions.append(GateAction("audio", end_ns, audio, self.mode))
         elif self._preroll_samples:
             self._preroll = np.concatenate((self._preroll, audio))[-self._preroll_samples:]
+
+    def discard_until(self, end_ns: int) -> list[GateAction]:
+        """Apply controls across lost PCM without admitting audio or pre-roll."""
+        actions = self.route(np.empty(0, np.float32), end_ns)
+        self._preroll = np.empty(0, np.float32)
+        return actions

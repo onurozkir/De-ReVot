@@ -94,7 +94,8 @@ compute_type = "int8"
 beam_size = 2
 # Committed translations use this value; replaceable partials stay greedy (beam 1)
 # to protect the live partial latency budget.
-enable_context_priming = true
+# Legacy enable_context_priming values are accepted for compatibility. Current
+# OPUS/NLLB adapters translate the whole current turn without prepended history.
 
 # Declarative bilingual pair routing. A pair routes to its OPUS model when the
 # directory exists; any other pair falls back to NLLB-200 when installed.

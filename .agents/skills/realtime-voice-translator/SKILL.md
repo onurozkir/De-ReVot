@@ -87,8 +87,12 @@ Apply this workflow whenever the skill matches:
 38. Start Meeting owns both directions for every application preset. PTT gates
     only outgoing microphone admission; incoming subtitles remain active. Keep
     key edges timestamped, queues bounded and 150 ms pre-roll sample-accurate.
-    Release requests immediate endpoint flush; it does not promise zero inference
-    latency or cut the committed cloned playback that follows the release.
+    PTT buffers one complete hold (including pauses), with no inference/partial/
+    MT/TTS before release. Flush input resampler tail, decode once, then commit
+    once. Accumulate acoustic evidence across pauses. Bound the hold to 30 seconds
+    including pre-roll; overflow/data loss cancels the whole turn until a new
+    press, never just its head. Release adds no silence timer but inference takes
+    time. See Plan.md DEC-U018.
 39. The Win32 desktop HUD is a secondary, click-through, no-activate surface.
     Keep WLK primary, start/stop native workers with the session, and expose native
     failures in status. Do not inject into games or claim exclusive-fullscreen
@@ -118,6 +122,12 @@ Apply this workflow whenever the skill matches:
     Hash and condition in the same deterministic order. Prepare before use and
     reuse the in-memory snapshot without WAV I/O per utterance. Reference edits
     take effect on the next prepare; see Plan.md §15 and the recording guide.
+46. Never trim multi-sentence MT output to its last sentence to remove prepended
+    context. NLLB/OPUS translate the full current turn; legacy context priming is
+    inactive. Allow full final decoder output budgets, separate from partials.
+47. Long cloned waveforms must use render backpressure outside callbacks, including
+    resampler tails. Never overwrite already committed PCM to fit the render ring.
+    Test sample continuity beyond ring capacity, cancellation and first-PCM events.
 
 Before editing, inspect the current implementation and dirty worktree. During
 review, reject growing backlog, committed reordering/loss, false Ready states,

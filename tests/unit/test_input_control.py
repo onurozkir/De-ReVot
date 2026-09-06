@@ -15,6 +15,15 @@ def test_timestamped_press_release_preserve_preroll_and_exact_last_sample():
     assert not gate.pressed
 
 
+def test_mode_is_attached_to_each_audio_slice_even_when_changed_in_same_frame():
+    gate = InputGate(1000, mode="ptt", preroll_ms=0)
+    gate.change("ptt", True, 0)
+    gate.change("ptt", False, 250_000_000)
+    gate.change("mode", "vad", 300_000_000)
+    actions = gate.route(np.ones(500), 500_000_000)
+    assert [a.input_mode for a in actions if a.kind == "audio"] == ["ptt", "vad"]
+
+
 def test_closed_gate_never_admits_audio_and_preroll_stays_bounded():
     gate = InputGate(16000, mode="ptt")
     for i in range(1000):

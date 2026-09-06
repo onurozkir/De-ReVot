@@ -177,7 +177,7 @@ To manually convert any downloaded HuggingFace model checkpoint to CTranslate2 I
 python scripts/convert_models_ct2.py --model models/mt/nllb-200-distilled-600M
 ```
 
-### Domain Glossary & Context Priming
+### Domain Glossary & Sentence Context
 
 - **Domain Glossary (`[translation.glossary]`)**: Protects technical, enterprise, or project-specific terminology from being mistranslated:
   ```toml
@@ -189,7 +189,7 @@ python scripts/convert_models_ct2.py --model models/mt/nllb-200-distilled-600M
   "arka uç" = "backend"
   "ön yüz" = "frontend"
   ```
-- **Discourse Context Priming (`enable_context_priming = true`)**: Feeds the previous committed sentence as discourse context to the decoder, resolving Turkish pro-drop ambiguities (e.g. distinguishing *"I made"* vs *"they made"*).
+- **Sentence context**: The complete current turn is translated together. NLLB no longer prepends the previous turn and discards everything except the last translated sentence. Legacy `enable_context_priming` values remain accepted but are inactive for OPUS/NLLB.
 
 ---
 
@@ -224,8 +224,13 @@ Choose an Application preset and microphone mode, then click **Start Meeting**.
 Gaming presets default to PTT; meetings default to hands-free VAD. Both audio
 directions remain in the same session. Mode can change live using `F9` or the UI.
 
-PTT retains 150 ms of microphone pre-roll. Releasing the configured key requests
-the final decode immediately without an added VAD silence timer. ASR, MT and TTS
+PTT retains 150 ms of microphone pre-roll and records the complete hold, including
+pauses between sentences. It does not transcribe, translate or speak that recording
+while the key is held. Release requests one final decode and one complete
+translation without an added VAD silence timer. Keep each hold under 30 seconds
+(including pre-roll); an overflowing or cancelled recording must be repeated.
+Playback waits for output-buffer space so long turns keep their first and last
+samples. ASR, MT and TTS
 still take time. Committed translated speech continues after key release, so using
 the same short PTT press in the game would clip that speech; use the game's open
 mic/voice-activity mode. When no committed speech is playing, VB-CABLE renders

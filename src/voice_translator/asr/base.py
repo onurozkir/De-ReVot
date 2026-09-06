@@ -31,6 +31,22 @@ class ASRSession:
 class ASRAdapter(abc.ABC):
     """Abstract contract for ASR backends."""
 
+    def buffer_audio(self, session: ASRSession, audio_chunk_16k: np.ndarray,
+                     captured_at_ns: int) -> None:
+        """Collect one endpoint-only turn without inference; never discard its head.
+
+        Backends consume this buffer in flush_session. A turn is bounded by
+        Whisper's 30-second window; callers must cancel an overflowing turn.
+        """
+        if not session.is_active or not len(audio_chunk_16k):
+            return
+        if session.total_audio_samples + len(audio_chunk_16k) > 480000:
+            raise ValueError("ptt_duration_exceeded")
+        session.metadata.setdefault("capture_start_ns", captured_at_ns - round(len(audio_chunk_16k) * 62500))
+        session.metadata["capture_end_ns"] = captured_at_ns
+        session.audio_buffer.append(np.asarray(audio_chunk_16k, dtype=np.float32).copy())
+        session.total_audio_samples += len(audio_chunk_16k)
+
     @abc.abstractmethod
     def initialize(self, model_path: str, device: str = "cuda", compute_type: str = "float16"):
         """Initialize the model offline; validate local paths."""

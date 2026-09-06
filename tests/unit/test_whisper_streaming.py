@@ -4,6 +4,7 @@ import threading
 import time
 
 import numpy as np
+import pytest
 import torch
 
 from voice_translator.asr.whisper_backend import WhisperASRAdapter
@@ -125,7 +126,8 @@ def test_adapter_reports_inference_wait_for_each_session():
     }
 
 
-def test_huggingface_decode_uses_one_length_owner_and_current_language():
+@pytest.mark.parametrize("is_final,max_length", [(False, 68), (True, 448)])
+def test_huggingface_decode_uses_one_length_owner_and_current_language(is_final, max_length):
     adapter = WhisperASRAdapter(min_audio_rms=0.0, beam_size=3)
 
     class FakeProcessor:
@@ -152,12 +154,12 @@ def test_huggingface_decode_uses_one_length_owner_and_current_language():
 
     adapter.processor = FakeProcessor()
     adapter.model = FakeModel()
-    text, info = adapter._transcribe_transformers(np.ones(4800, dtype=np.float32) * 0.1, "tr")
+    text, info = adapter._decode_audio(np.ones(4800, dtype=np.float32) * 0.1, "tr", is_final=is_final)
 
     assert text == "Merhaba nasılsınız?"
     assert "avg_logprob" in info
     assert adapter.model.generation_config.max_length == 448
-    assert adapter.model.received.max_length == 68
+    assert adapter.model.received.max_length == max_length
     assert adapter.model.received.max_new_tokens is None
     assert adapter.model.received.forced_decoder_ids is None
     assert adapter.model.received.language == "tr"
