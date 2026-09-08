@@ -96,4 +96,5 @@ def test_orchestrator_wires_runtime_config_into_adapters(monkeypatch, tmp_path):
         "top_p": 0.85,
         "repetition_penalty": 2.0,
         "peak_normalization": True,
+        "stream_chunk_size": 8,
     }

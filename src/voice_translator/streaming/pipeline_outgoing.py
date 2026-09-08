@@ -320,6 +320,9 @@ class OutgoingPipeline:
             # decoder's completion time or the last resampler output boundary.
             self.asr_session.metadata["capture_start_ns"] = self._ptt_start_ns
             self.asr_session.metadata["capture_end_ns"] = at_ns
+            # This entire held recording has passed duration/voicing admission.
+            # Pauses must not veto it again via whole-recording average energy.
+            self.asr_session.metadata["ptt_speech_verified"] = True
             final = self.asr_adapter.flush_session(self.asr_session)
             if self._ptt_cancelled:
                 return
@@ -330,6 +333,7 @@ class OutgoingPipeline:
             else:
                 self._reject_current("no_asr_text", "")
         finally:
+            self.asr_session.metadata.pop("ptt_speech_verified", None)
             reset_asr_utterance(self.asr_session)
             self.commit_controller.reset()
             self.vad.reset()

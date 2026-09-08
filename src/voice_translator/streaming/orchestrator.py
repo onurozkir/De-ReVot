@@ -155,6 +155,7 @@ class MeetingOrchestrator:
                     top_p=self.config.tts.top_p,
                     repetition_penalty=self.config.tts.repetition_penalty,
                     peak_normalization=self.config.tts.peak_normalization,
+                    stream_chunk_size=self.config.tts.stream_chunk_size,
                 )
 
             # Initialize models offline

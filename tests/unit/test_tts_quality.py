@@ -39,10 +39,10 @@ def test_xtts_inference_passes_hyperparameters(tmp_path):
     received = {}
 
     class FakeModel:
-        def inference(self, **kwargs):
+        def inference_stream(self, **kwargs):
             received.update(kwargs)
             # Output audio with peak 1.5 (clipping)
-            return {"wav": [0.0, 1.5, -1.2, 0.5]}
+            yield np.array([0.0, 1.5, -1.2, 0.5])
 
     ref1 = tmp_path / "reference.wav"
     ref1.write_bytes(b"sample1")
@@ -75,10 +75,11 @@ def test_xtts_inference_passes_hyperparameters(tmp_path):
     assert received["top_p"] == 0.82
     assert received["repetition_penalty"] == 2.2
 
-    # Peak normalization should have scaled peak from 1.5 to ~0.89125 (-1.0 dBFS)
+    # Streaming applies a fixed ceiling, never future-dependent gain scaling.
     peak = float(np.max(np.abs(pcm)))
     assert pytest.approx(peak, abs=1e-4) == 0.89125
     assert peak < 1.0
+    assert pcm[-1] == .5
 
 
 def test_multi_sample_hash_and_conditioning(tmp_path):
@@ -196,8 +197,8 @@ def test_conditioning_disk_cache_and_no_audio_io_per_utterance(tmp_path, monkeyp
             calls.append(kwargs)
             return torch.ones(1, 2, 3), torch.ones(1, 4, 1)
 
-        def inference(self, **kwargs):
-            return {"wav": np.array([0.1], dtype=np.float32)}
+        def inference_stream(self, **kwargs):
+            yield np.array([0.1], dtype=np.float32)
 
     profile = VoiceProfile("six", "Six", "xtts_v2", reference_audio_paths=[str(p) for p in reversed(paths)],
                            conditioning_cache_path=str(tmp_path / "cache"))

@@ -127,7 +127,8 @@ def test_adapter_reports_inference_wait_for_each_session():
 
 
 @pytest.mark.parametrize("is_final,max_length", [(False, 68), (True, 448)])
-def test_huggingface_decode_uses_one_length_owner_and_current_language(is_final, max_length):
+@pytest.mark.parametrize("speech_verified", [False, True])
+def test_huggingface_decode_uses_one_length_owner_and_current_language(is_final, max_length, speech_verified):
     adapter = WhisperASRAdapter(min_audio_rms=0.0, beam_size=3)
 
     class FakeProcessor:
@@ -154,7 +155,16 @@ def test_huggingface_decode_uses_one_length_owner_and_current_language(is_final,
 
     adapter.processor = FakeProcessor()
     adapter.model = FakeModel()
-    text, info = adapter._decode_audio(np.ones(4800, dtype=np.float32) * 0.1, "tr", is_final=is_final)
+    if speech_verified:
+        adapter.min_audio_rms = .003
+    text, info = adapter._decode_audio(
+        np.ones(4800, dtype=np.float32) * (.001 if speech_verified else .1), "tr",
+        is_final=is_final, speech_verified=speech_verified,
+    )
+    if speech_verified and not is_final:
+        assert text == ""
+        assert adapter.model.received is None
+        return
 
     assert text == "Merhaba nasılsınız?"
     assert "avg_logprob" in info

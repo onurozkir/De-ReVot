@@ -113,6 +113,8 @@ src/voice_translator/
 
 ## 3. Configuration & Scripts
 
+* `scripts/benchmark_tts_streaming.py`: Offline full-waveform vs native XTTS streaming TTFA/RTF, chunk timing and GPU evidence; Chatterbox eligibility is reported separately.
+
 * `config/default.toml`: Primary application configuration (audio endpoint selectors, model paths, ASR/MT/TTS hyperparameters, queue sizes).
 * `scripts/download_models.py`: CLI model downloader ensuring offline local weights policy.
 * `scripts/convert_models_ct2.py`: Utility to convert HuggingFace models to CTranslate2 INT8 format.

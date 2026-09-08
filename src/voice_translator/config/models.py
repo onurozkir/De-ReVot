@@ -130,6 +130,7 @@ class TTSConfig(BaseModel):
     top_p: float = 0.85
     repetition_penalty: float = 2.0
     peak_normalization: bool = True
+    stream_chunk_size: int = Field(default=8, ge=2, le=40)
 
 
 class VoiceConfig(BaseModel):

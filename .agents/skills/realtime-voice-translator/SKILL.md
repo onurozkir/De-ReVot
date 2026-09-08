@@ -128,6 +128,14 @@ Apply this workflow whenever the skill matches:
 47. Long cloned waveforms must use render backpressure outside callbacks, including
     resampler tails. Never overwrite already committed PCM to fit the render ring.
     Test sample continuity beyond ring capacity, cancellation and first-PCM events.
+48. XTTS streaming compatibility must preserve single-token decoding with a populated
+    KV cache. Verify the installed Coqui/Transformers loop with an offline tiny-model
+    regression; keep patches instance-scoped. Bound synthetic warmup generation and
+    validate PCM before Ready. See Plan.md's 2026-09-08 XTTS runtime finding.
+
+49. Preserve the one-shot verified PTT speech admission when flushing ASR. Pauses
+    must not cause a second whole-turn RMS veto after acoustic admission. Keep
+    unverified/partial energy gates and final confidence guards; see Plan.md §12.4.
 
 Before editing, inspect the current implementation and dirty worktree. During
 review, reject growing backlog, committed reordering/loss, false Ready states,

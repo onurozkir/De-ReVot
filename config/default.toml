@@ -114,6 +114,8 @@ beam_size = 2
 "hata kaydı" = "issue"
 
 [tts]
+# Native incremental XTTS decoder; lower sizes trade vocoder work for earlier PCM.
+stream_chunk_size = 8
 backend = "xtts_v2"
 model_path = "models/tts/xtts-v2"
 device = "cuda"

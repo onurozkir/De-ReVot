@@ -338,13 +338,13 @@ class WhisperASRAdapter(ASRAdapter):
             raise WarmupError(f"Whisper warmup failed: {e}") from e
 
     def _transcribe_transformers(self, audio_16k: np.ndarray, language: str, prompt: str = "",
-                                *, is_final: bool = False) -> tuple[str, dict[str, float]]:
+                                *, is_final: bool = False, speech_verified: bool = False) -> tuple[str, dict[str, float]]:
         if self.model is None or self.processor is None:
             return "", {}
 
         # Energy gate: do not transcribe silence/noise
         rms = np.sqrt(np.mean(audio_16k ** 2)) if len(audio_16k) > 0 else 0.0
-        if rms < self.min_audio_rms:
+        if rms < self.min_audio_rms and not (is_final and speech_verified):
             return "", {"audio_rms": float(rms)}
 
         inputs = self.processor(audio_16k, sampling_rate=16000, return_tensors="pt")
@@ -525,6 +525,7 @@ class WhisperASRAdapter(ASRAdapter):
         direction: Optional[Direction] = None,
         is_final: bool = False,
         audio_end_ns: Optional[int] = None,
+        speech_verified: bool = False,
     ) -> tuple[str, dict[str, Any]]:
         rms = float(np.sqrt(np.mean(audio_16k ** 2))) if len(audio_16k) else 0.0
         model_info: dict[str, Any] = {
@@ -533,7 +534,7 @@ class WhisperASRAdapter(ASRAdapter):
             "audio_rms": rms,
             "condition_on_previous_text": False,
         }
-        if rms < self.min_audio_rms:
+        if rms < self.min_audio_rms and not (is_final and speech_verified):
             return "", model_info
 
         with self._inference_scheduler.acquire(
@@ -567,7 +568,10 @@ class WhisperASRAdapter(ASRAdapter):
                     model_info["language_probability"] = float(info.language_probability)
                 return text, model_info
 
-            text, transformer_info = self._transcribe_transformers(audio_16k, language, prompt=prompt, is_final=is_final)
+            text, transformer_info = self._transcribe_transformers(
+                audio_16k, language, prompt=prompt, is_final=is_final,
+                speech_verified=speech_verified,
+            )
             model_info.update(transformer_info)
             return text, model_info
 
@@ -592,6 +596,8 @@ class WhisperASRAdapter(ASRAdapter):
             logger.debug("ASR inference wait subscriber failed", exc_info=True)
 
     def flush_session(self, session: ASRSession) -> Optional[UtteranceEvent]:
+        # One-shot admission from the PTT pipeline, never shared across turns.
+        speech_verified = bool(session.metadata.pop("ptt_speech_verified", False))
         if not session.audio_buffer:
             session.audio_buffer.clear()
             session.total_audio_samples = 0
@@ -610,6 +616,7 @@ class WhisperASRAdapter(ASRAdapter):
                     direction=session.direction,
                     is_final=True,
                     audio_end_ns=int(session.metadata.get("capture_end_ns", time.monotonic_ns())),
+                    speech_verified=speech_verified,
                 )
             except TypeError:
                 try:

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import logging
+import inspect
+import time
 import hashlib
 import json
 import os
 import threading
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Tuple
+from types import MethodType
 import numpy as np
 
 from voice_translator.core.errors import ModelNotFoundError, WarmupError
@@ -17,6 +21,37 @@ from voice_translator.tts.base import TTSAdapter, VoiceProfile
 from voice_translator.tts.conditioning import VoiceProfileManager
 
 logger = logging.getLogger(__name__)
+
+
+def _stream_cache_compat(self, sequence_length, device, model_kwargs):
+    """Coqui 0.27.5 calls a helper removed in Transformers 5.3+.
+
+    No legacy cache_position kwarg is needed. Input slicing is restored separately
+    by _configure_streaming_compat. Bound only to this XTTS inference instance.
+    """
+    return model_kwargs
+
+
+def _configure_streaming_compat(inference_model):
+    """Bridge Coqui's legacy streaming loop to the installed generation API."""
+    if not hasattr(inference_model, "_get_initial_cache_position"):
+        inference_model._get_initial_cache_position = MethodType(_stream_cache_compat, inference_model)
+    prepare = inference_model.prepare_inputs_for_generation
+    if "next_sequence_length" not in inspect.signature(prepare).parameters:
+        return
+
+    @wraps(prepare)
+    def prepare_stream_inputs(input_ids, **kwargs):
+        cache = kwargs.get("past_key_values")
+        # Coqui does not pass the new slicing argument. Refeeding the entire
+        # prefix into a populated KV cache grows memory and corrupts decoding.
+        # Preserve explicit lengths from native generate() and uncached inputs.
+        if ("next_sequence_length" not in kwargs and kwargs.get("use_cache", True)
+                and cache is not None and cache.get_seq_length() > 0):
+            kwargs["next_sequence_length"] = 1
+        return prepare(input_ids, **kwargs)
+
+    inference_model.prepare_inputs_for_generation = prepare_stream_inputs
 
 _tts_import_error: Optional[Exception] = None
 try:
@@ -73,6 +108,8 @@ except Exception as _tts_err:
 class XTTSv2Adapter(TTSAdapter):
     """XTTS-v2 Voice Cloning Adapter with cross-language synthesis and conditioning caching."""
 
+    synthesis_mode = "true_streaming"
+
     def __init__(
         self,
         temperature: float = 0.65,
@@ -80,6 +117,7 @@ class XTTSv2Adapter(TTSAdapter):
         top_p: float = 0.85,
         repetition_penalty: float = 2.0,
         peak_normalization: bool = True,
+        stream_chunk_size: int = 8,
     ):
         self.model: Optional[Any] = None
         self.config: Optional[Any] = None
@@ -91,6 +129,9 @@ class XTTSv2Adapter(TTSAdapter):
         self.top_p = float(top_p)
         self.repetition_penalty = float(repetition_penalty)
         self.peak_normalization = bool(peak_normalization)
+        if not 2 <= stream_chunk_size <= 40:
+            raise ValueError("XTTS stream_chunk_size must be between 2 and 40 acoustic tokens.")
+        self.stream_chunk_size = int(stream_chunk_size)
         if self.temperature <= 0:
             raise ValueError("XTTS temperature must be greater than zero.")
         if self.speed <= 0:
@@ -140,6 +181,8 @@ class XTTSv2Adapter(TTSAdapter):
         )
         if device == "cuda" and torch.cuda.is_available():
             self.model.cuda()
+        inference_model = self.model.gpt.gpt_inference
+        _configure_streaming_compat(inference_model)
         # Local checkpoint metadata plus config/provenance content identifies the
         # offline model without rehashing gigabytes on every profile switch.
         identity = {"path": str(p.resolve()), "runtime": "coqui-tts==0.27.5"}
@@ -154,16 +197,18 @@ class XTTSv2Adapter(TTSAdapter):
         logger.info("XTTS-v2 model loaded successfully.")
 
     def warmup(self):
+        self._is_warm = False
         if self.model is None:
             raise WarmupError("XTTS model not initialized before warmup.")
         logger.info("Warming up XTTS-v2 model...")
+        started = time.perf_counter()
         try:
             # Create dummy latents with correct dimensions
             gpt_cond_latent = torch.zeros((1, 30, 1024), device=self.device)
             speaker_embedding = torch.zeros((1, 512, 1), device=self.device)
             
-            # Dummy synthesis
-            _ = self.model.inference(
+            # Exercise the same incremental decoder/vocoder path before Ready.
+            stream = self.model.inference_stream(
                 text="Test warmup.",
                 language="en",
                 gpt_cond_latent=gpt_cond_latent,
@@ -173,9 +218,28 @@ class XTTSv2Adapter(TTSAdapter):
                 top_p=self.top_p,
                 repetition_penalty=self.repetition_penalty,
                 enable_text_splitting=False,
+                stream_chunk_size=self.stream_chunk_size,
+                overlap_wav_len=1024,
+                # Zero conditioning need not emit EOS promptly. Exercise the
+                # decoder and vocoder without generating a full dummy utterance.
+                max_new_tokens=2 * self.stream_chunk_size,
             )
+            chunks = 0
+            try:
+                for chunk in stream:
+                    if torch.is_tensor(chunk):
+                        chunk = chunk.detach().float().cpu().numpy()
+                    pcm = np.asarray(chunk)
+                    if not np.isfinite(pcm).all():
+                        raise ValueError("XTTS warmup produced non-finite PCM")
+                    if pcm.size:
+                        chunks += 1
+            finally:
+                stream.close()
+            if not chunks:
+                raise ValueError("XTTS warmup produced no PCM")
             self._is_warm = True
-            logger.info("XTTS-v2 warmup completed.")
+            logger.info("XTTS-v2 warmup completed in %.2fs (%d chunks).", time.perf_counter() - started, chunks)
         except Exception as e:
             raise WarmupError(f"XTTS warmup failed: {e}") from e
 
@@ -260,8 +324,9 @@ class XTTSv2Adapter(TTSAdapter):
                 f"Voice conditioning is unavailable for profile '{profile.display_name}'."
             )
 
+        stream = None
         try:
-            out = self.model.inference(
+            stream = self.model.inference_stream(
                 text=text,
                 language=target_language,
                 gpt_cond_latent=gpt_cond_latent,
@@ -271,16 +336,27 @@ class XTTSv2Adapter(TTSAdapter):
                 top_p=self.top_p,
                 repetition_penalty=self.repetition_penalty,
                 enable_text_splitting=False,
+                stream_chunk_size=self.stream_chunk_size,
+                overlap_wav_len=1024,
             )
-            pcm_data = np.asarray(out["wav"], dtype=np.float32)
-            if self.peak_normalization and pcm_data.size > 0:
-                max_val = float(np.max(np.abs(pcm_data)))
-                if max_val > 1e-6:
-                    target_peak = 0.89125  # -1.0 dBFS
-                    pcm_data = pcm_data * (target_peak / max_val)
-            yield pcm_data
+            for chunk in stream:
+                if torch is not None and torch.is_tensor(chunk):
+                    chunk = chunk.detach().float().cpu().numpy()
+                pcm_data = np.asarray(chunk, dtype=np.float32).reshape(-1).copy()
+                if not pcm_data.size:
+                    continue
+                if not np.isfinite(pcm_data).all():
+                    raise RuntimeError("XTTS produced non-finite PCM")
+                if self.peak_normalization:
+                    # A full-utterance peak needs future samples. Keep a fixed
+                    # -1 dBFS ceiling without chunk-wise gain jumps or buffering.
+                    np.clip(pcm_data, -0.89125, 0.89125, out=pcm_data)
+                yield pcm_data
         except Exception as e:
-            logger.error(f"XTTS synthesis error: {e}")
+            raise RuntimeError(f"XTTS streaming synthesis failed: {e}") from e
+        finally:
+            if stream is not None and hasattr(stream, "close"):
+                stream.close()
 
     def shutdown(self):
         self.model = None

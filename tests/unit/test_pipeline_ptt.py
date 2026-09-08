@@ -12,6 +12,7 @@ from voice_translator.streaming.vad import SileroVAD
 from voice_translator.translation.mock_backend import MockMTAdapter
 from voice_translator.tts.mock_backend import MockTTSAdapter
 from voice_translator.tts.base import VoiceProfile
+from types import SimpleNamespace
 
 
 def make_pipeline():
@@ -147,6 +148,38 @@ def test_fifteen_second_hold_preserves_all_sentences_until_release():
     assert commits[0].text == "Birinci cümle. İkinci cümle. Son cümle."
     assert commits[0].audio_start_ns == 0
     assert commits[0].audio_end_ns == 15_000_000_000
+
+
+def test_verified_ptt_speech_is_not_rejected_by_pause_diluted_rms():
+    pipeline, _, commits, _ = make_pipeline()
+    pipeline.input_gate = InputGate(16000, "ptt", preroll_ms=0)
+    # Model VAD can recognize quiet speech that the whole-turn RMS cannot.
+    pipeline.vad = SileroVAD(load_model=False, energy_start_dbfs=-50, energy_end_dbfs=-60)
+    decoded = []
+
+    class Model:
+        def transcribe(self, audio, **kwargs):
+            decoded.append(audio.copy())
+            return [SimpleNamespace(text="Teşekkür ederim", avg_logprob=-.2)], SimpleNamespace()
+
+    adapter = pipeline.asr_adapter
+    adapter.model = Model()
+    adapter.backend_type = "faster_whisper"
+    adapter.min_audio_rms = .003
+    adapter._decode_audio = WhisperASRAdapter._decode_audio.__get__(adapter)
+    audio = np.concatenate([np.full(16000, .004, np.float32), np.zeros(48000, np.float32)])
+    pipeline.request_input("ptt", True, 0)
+    for offset in range(0, len(audio), 320):
+        pipeline._process_gated_audio(audio[offset:offset + 320], (offset + 320) * 62500, 20)
+    assert not decoded
+    pipeline.request_input("ptt", False, 4_000_000_000)
+    pipeline._process_gated_audio(np.empty(0, np.float32), 4_000_000_000, 0)
+    assert len(commits) == 1
+    np.testing.assert_array_equal(decoded[0], audio)
+    assert "ptt_speech_verified" not in pipeline.asr_session.metadata
+    # A subsequent unverified decode retains its energy gate.
+    assert adapter._decode_audio(audio, "tr", is_final=True)[0] == ""
+    assert len(decoded) == 1
 
 
 def test_native_resampler_flush_preserves_tail_and_isolates_next_hold():

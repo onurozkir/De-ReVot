@@ -1,0 +1,134 @@
+{
+  "scope": "offline TTS only; no ASR/MT or physical playback",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "gpu": "NVIDIA GeForce RTX 5060 Ti",
+  "packages": {
+    "coqui-tts": "0.27.5",
+    "torch": "2.11.0+cu128",
+    "transformers": "5.16.1"
+  },
+  "model": "C:\\dev\\speech-to-translate\\models\\tts\\xtts-v2",
+  "profile": "default",
+  "reference_hash": "feb330e36cddc8c6223064f608cbe8680133e5792131b4bce357bd1b27d7f349",
+  "corpus": [
+    "Hello, I am testing the voice translator.",
+    "We will compare three different solutions and review twenty four files before the meeting.",
+    "I am testing push to talk in meetings and games. My sentences should stay together. Please translate the complete recording after I release the key."
+  ],
+  "seed": 42,
+  "ttfa_target_ms": {
+    "status": "TARGET",
+    "value": 300
+  },
+  "live_queue_age_ms": "UNKNOWN",
+  "full_duplex_soak": "UNKNOWN",
+  "speaker_similarity": "UNKNOWN",
+  "human_listening_acceptance": "UNKNOWN",
+  "runs": [],
+  "chatterbox": {
+    "status": "UNKNOWN",
+    "eligible": false,
+    "reason": "Local adapter is a silence stub; model weights absent. Upstream 0.1.7 pins torch/torchaudio 2.6.0 and numpy<2 on Python 3.12, conflicting with this CUDA 12.8/Torch>=2.7/numpy>=2.1 runtime. No performance ranking is claimed.",
+    "source": "https://github.com/resemble-ai/chatterbox/blob/master/pyproject.toml"
+  },
+  "model_manifest": {
+    "repo_id": "coqui/XTTS-v2",
+    "revision": "6c2b0d75eae4b7047358e3b6bd9325f857d43f77",
+    "license": "other",
+    "destination": "C:\\dev\\speech-to-translate\\models\\tts\\xtts-v2",
+    "purpose": "Cross-language Voice Cloning TTS",
+    "files": [
+      {
+        "path": ".gitattributes",
+        "bytes": 1519,
+        "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
+      },
+      {
+        "path": "LICENSE.txt",
+        "bytes": 4014,
+        "sha256": "190f6d7c19b8984f91b97712b94ce92d2b2e640fc677dacab966e955ece9d043"
+      },
+      {
+        "path": "README.md",
+        "bytes": 4263,
+        "sha256": "1cfa85b3293f685b3a6537f8da3d94820fd111270e553589073885dea3facfb7"
+      },
+      {
+        "path": "config.json",
+        "bytes": 4368,
+        "sha256": "ef262b1454dd2a77e1461b0b2cd53e19b8a7624cc131b837d36df67356bc75e8"
+      },
+      {
+        "path": "dvae.pth",
+        "bytes": 210514388,
+        "sha256": "b29bc227d410d4991e0a8c09b858f77415013eeb9fba9650258e96095557d97a"
+      },
+      {
+        "path": "hash.md5",
+        "bytes": 32,
+        "sha256": "ef2e25fc4639bb81c6c5048740c1ee8268606a160548abaa2e2fe03b12278c54"
+      },
+      {
+        "path": "mel_stats.pth",
+        "bytes": 1067,
+        "sha256": "1f69422a8a8f344c4fca2f0c6b8d41d2151d6615b7321e48e6bb15ae949b119c"
+      },
+      {
+        "path": "model.pth",
+        "bytes": 1867929118,
+        "sha256": "c7ea20001c6a0a841c77e252d8409f6a74fb423e79b3206a0771ba5989776187"
+      },
+      {
+        "path": "samples/de_sample.wav",
+        "bytes": 299066,
+        "sha256": "c5c7190fa0ad2f940f31807b9db57ca4917e8ba7fc3dc6c4868c3727c76934a8"
+      },
+      {
+        "path": "samples/en_sample.wav",
+        "bytes": 299066,
+        "sha256": "2bb31e7bf2b1e6f98f21be9017f5daee44a40ca91126955485f430b272e1a8b5"
+      },
+      {
+        "path": "samples/es_sample.wav",
+        "bytes": 329786,
+        "sha256": "85fdf2f76df1b468a43d2f2ee7e1b8a38e42ed23bb3d5aa41c9d872f1796f544"
+      },
+      {
+        "path": "samples/fr_sample.wav",
+        "bytes": 432186,
+        "sha256": "f2d86fada78ae2d062fdda550869f886f32a9072d79e43c8b4a892622c5279c8"
+      },
+      {
+        "path": "samples/ja-sample.wav",
+        "bytes": 284730,
+        "sha256": "20bbc6c58e5221564e76ee40792bbc1fd48a4cb16bf5ff041644df14c635bbb4"
+      },
+      {
+        "path": "samples/pt_sample.wav",
+        "bytes": 445498,
+        "sha256": "52deae2188abb9e257e3cb6c91bbd2bf6cd71b3e4c4a197b6c6b15c55ea6f15a"
+      },
+      {
+        "path": "samples/tr_sample.wav",
+        "bytes": 299066,
+        "sha256": "72d030a736fb9ada710109f4c7b2a0d425675607b1911e33b7af7070595273d3"
+      },
+      {
+        "path": "samples/zh-cn-sample.wav",
+        "bytes": 383034,
+        "sha256": "36b230d0e8e8a17c8e3877962a07c522c339cacac97d5b9950b7a4d9c407ece6"
+      },
+      {
+        "path": "speakers_xtts.pth",
+        "bytes": 7754818,
+        "sha256": "f0f6137c19a4eab0cbbe4c99b5babacf68b1746e50da90807708c10e645b943b"
+      },
+      {
+        "path": "vocab.json",
+        "bytes": 361219,
+        "sha256": "928260878a59da8a72a2a5b7687fea29d5106137669d90945430fe17e415304a"
+      }
+    ]
+  },
+  "error": "XTTS warmup failed: CUDA out of memory. Tried to allocate 132.00 MiB. GPU 0 has a total capacity of 15.93 GiB of which 0 bytes is free. Of the allocated memory 13.52 GiB is allocated by PyTorch, and 16.36 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)"
+}
